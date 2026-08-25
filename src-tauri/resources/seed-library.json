@@ -1,0 +1,10 @@
+[
+  {
+    "id": "seed-expressive-facegen-morphs",
+    "kind": "morph",
+    "pattern": "EFM_",
+    "match_type": "prefix",
+    "name": "Expressive Facegen Morphs",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/35785"
+  }
+]

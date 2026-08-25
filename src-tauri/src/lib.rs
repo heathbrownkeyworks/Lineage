@@ -4,6 +4,7 @@ pub mod assets;
 pub mod backup;
 pub mod detect;
 pub mod jslot;
+pub mod library;
 pub mod nexus;
 pub mod ops;
 pub mod rawjson;
