@@ -55,7 +55,7 @@
       selectedKind = (references[0]?.kind as Kind | undefined) ?? "plugin";
       pattern = references[0]?.value ?? "";
       checked = new Set(references.map(refKey));
-      dialog.showModal();
+      if (!dialog.open) dialog.showModal();
     } else if (dialog.open) {
       dialog.close();
     }
