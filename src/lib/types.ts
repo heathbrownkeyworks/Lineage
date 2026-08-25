@@ -233,6 +233,9 @@ export type AssetRef = {
 };
 
 export type IdentifiedGroup = {
+  /** Unique group identity from the backend — the only safe list key: two
+   *  groups can share mod_id, name and URL (e.g. the ECE/CME slider pair). */
+  key: string;
   mod_id: number | null;
   nexus: NexusModInfo | null;
   mod_folder: string | null;

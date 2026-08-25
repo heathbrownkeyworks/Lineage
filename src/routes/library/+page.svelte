@@ -368,6 +368,12 @@
     </div>
 
     <div class="review-body">
+      <!-- Outside the run/empty/report branches: a failed *first* run has no
+           report to nest the error under, and silently dropping back to the
+           empty state is what made a failure look like a hang. -->
+      {#if reviewError}
+        <div class="note note-danger">{reviewError}</div>
+      {/if}
       {#if reviewRunning}
         <div class="stage-block">
           <p class="stage">
@@ -396,9 +402,6 @@
         </EmptyState>
       {:else}
         {@const report = reviewReport}
-        {#if reviewError}
-          <div class="note note-danger">{reviewError}</div>
-        {/if}
         {#if report.nexus_error}
           <div class="note note-warning">{report.nexus_error}</div>
         {/if}
@@ -420,7 +423,7 @@
             <section>
               <h3 class="sf-label">Identified · {sortedIdentified.length}</h3>
               <ul class="identified-list">
-                {#each sortedIdentified as group, i (group.mod_id ?? group.mod_folder ?? i)}
+                {#each sortedIdentified as group (group.key)}
                   <li class="identified-row">
                     <div class="row-main">
                       <span class="name" title={groupTitle(group)}>{groupTitle(group)}</span>

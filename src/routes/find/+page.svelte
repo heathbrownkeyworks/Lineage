@@ -165,7 +165,7 @@
           <section>
             <h2 class="sf-label">Identified · {report.identified.length}</h2>
             <div class="cards fx-stagger">
-              {#each report.identified as group, i (group.mod_id ?? group.mod_folder ?? i)}
+              {#each report.identified as group, i (group.key)}
                 <article class="mod-card sf-card" style="--i: {i}">
                   {#if group.nexus?.picture_url}
                     <img class="thumb" src={group.nexus.picture_url} alt="" loading="lazy" />

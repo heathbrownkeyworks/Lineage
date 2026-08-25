@@ -39,6 +39,12 @@ pub struct AssetRef {
 
 #[derive(Debug, Serialize)]
 pub struct IdentifiedGroup {
+    /// Unique group identity ("nexus:6817" / "folder:ks hairdos" /
+    /// "library:seed-cme-morphs"), assigned by `Groups::add`. The visible
+    /// fields are NOT unique — two library entries can share a mod id, a name
+    /// and a URL (the ECE/CME slider pair are both mod 12302) — so this is the
+    /// only safe key for a keyed list in the UI.
+    pub key: String,
     pub mod_id: Option<u32>,
     pub nexus: Option<NexusModInfo>,
     /// Local mod folder the assets live in, when known.
@@ -419,7 +425,9 @@ impl Groups {
     fn add(&mut self, key: String, make: impl FnOnce() -> IdentifiedGroup, asset: &AssetRef) {
         if !self.map.contains_key(&key) {
             self.order.push(key.clone());
-            self.map.insert(key.clone(), make());
+            let mut group = make();
+            key.clone_into(&mut group.key);
+            self.map.insert(key.clone(), group);
         }
         let group = self.map.get_mut(&key).expect("just inserted");
         if !group
@@ -476,6 +484,7 @@ fn add_library_group(
     groups.add(
         format!("library:{}", hit.entry.id),
         || IdentifiedGroup {
+            key: String::new(), // Groups::add fills this in.
             mod_id,
             nexus: info,
             mod_folder: None,
@@ -641,6 +650,7 @@ pub(crate) fn resolve_refs(
             groups.add(
                 format!("nexus:{mod_id}"),
                 || IdentifiedGroup {
+                    key: String::new(),
                     mod_id: Some(mod_id),
                     nexus: info,
                     mod_folder: hit.mod_folder.clone(),
@@ -668,6 +678,7 @@ pub(crate) fn resolve_refs(
                 groups.add(
                     key,
                     || IdentifiedGroup {
+                        key: String::new(),
                         mod_id,
                         nexus: info,
                         mod_folder: Some(source.clone()),
@@ -700,6 +711,7 @@ pub(crate) fn resolve_refs(
                             groups.add(
                                 format!("nexus:{mod_id}"),
                                 || IdentifiedGroup {
+                                    key: String::new(),
                                     mod_id: Some(mod_id),
                                     nexus: Some(info),
                                     mod_folder: hit.mod_folder.clone(),
@@ -736,6 +748,7 @@ pub(crate) fn resolve_refs(
                 groups.add(
                     format!("folder:{}", folder.to_ascii_lowercase()),
                     || IdentifiedGroup {
+                        key: String::new(),
                         mod_id: None,
                         nexus: None,
                         mod_folder: Some(folder.clone()),
@@ -1408,6 +1421,44 @@ mod tests {
         assert_eq!(seed_tex.resolved_by, "library");
         assert_eq!(seed_tex.library_source.as_deref(), Some("seed"));
         assert!(seed_tex.assets.iter().any(|a| a.value == "custom\\seedtex.dds"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every identified group carries a distinct `key`, even when several
+    /// groups are indistinguishable on their visible fields. The shipped seed
+    /// library really does contain such pairs — the ECE_/CME_ slider entries
+    /// and the two Kyoe brow plugin spellings each point at one Nexus mod —
+    /// and the UI lists groups in a keyed `{#each}`, which throws on a
+    /// duplicate key and aborts the whole render.
+    #[test]
+    fn identified_groups_carry_unique_keys() {
+        let dir = std::env::temp_dir().join(format!("lineage-group-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let library = crate::library::load_from_dir(&dir);
+        let settings = AppSettings::default();
+        let ctx = build_context(&settings);
+
+        let refs = |kind: &str, value: &str| AssetRef {
+            kind: kind.into(), value: value.into(), appeared_in: vec!["test".into()],
+        };
+        let plugins = vec![
+            refs("plugin", "Kyoe_BanginBrows.esp"),
+            refs("plugin", "Kyoe BanginBrows.esp"),
+        ];
+        let morphs = vec![refs("morph", "ECE_Widen"), refs("morph", "CME_Widen")];
+        let out = resolve_refs_offline(&settings, &ctx, &library, &plugins, &[], &morphs);
+
+        assert_eq!(out.identified.len(), 4, "one group per matched seed entry");
+        let keys: std::collections::HashSet<&str> =
+            out.identified.iter().map(|g| g.key.as_str()).collect();
+        assert_eq!(keys.len(), out.identified.len(), "group keys are unique");
+        assert!(out.identified.iter().all(|g| !g.key.is_empty()));
+        // The collision the key field exists to survive: distinct groups, same mod id.
+        let mod_ids: Vec<Option<u32>> = out.identified.iter().map(|g| g.mod_id).collect();
+        assert_eq!(mod_ids.iter().filter(|id| **id == Some(12302)).count(), 2);
+        assert_eq!(mod_ids.iter().filter(|id| **id == Some(13630)).count(), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
