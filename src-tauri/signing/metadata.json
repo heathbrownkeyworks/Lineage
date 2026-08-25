@@ -1,0 +1,16 @@
+{
+  "Endpoint": "https://wus3.codesigning.azure.net",
+  "CodeSigningAccountName": "coldsun-signing",
+  "CertificateProfileName": "effigy-public-clean",
+  "ExcludeCredentials": [
+    "EnvironmentCredential",
+    "ManagedIdentityCredential",
+    "WorkloadIdentityCredential",
+    "SharedTokenCacheCredential",
+    "VisualStudioCredential",
+    "VisualStudioCodeCredential",
+    "AzurePowerShellCredential",
+    "AzureDeveloperCliCredential",
+    "InteractiveBrowserCredential"
+  ]
+}
