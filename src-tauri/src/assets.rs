@@ -34,8 +34,6 @@ pub struct AssetRef {
     pub value: String,
     /// Which preset sections referenced it.
     pub appeared_in: Vec<String>,
-    /// Optional origin hint for morphs with recognizable prefixes.
-    pub hint: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -46,7 +44,9 @@ pub struct IdentifiedGroup {
     pub mod_folder: Option<String>,
     /// "meta.ini" | "md5" | "vortex-manifest" | "heuristic" | "local-folder"
     pub resolved_by: String,
-    pub nexus_url: Option<String>,
+    pub page_url: Option<String>,
+    pub name: Option<String>,
+    pub library_source: Option<String>,
     pub assets: Vec<AssetRef>,
 }
 
@@ -86,19 +86,6 @@ fn is_vanilla_plugin(name: &str) -> bool {
     ) || (l.starts_with("cc") && (l.ends_with(".esm") || l.ends_with(".esl")))
 }
 
-fn morph_hint(name: &str) -> Option<String> {
-    let l = name.to_ascii_lowercase();
-    if l.starts_with("efm_") {
-        Some("Expressive Facegen Morphs slider".into())
-    } else if l.starts_with("ece_") || l.starts_with("cme_") {
-        Some("Enhanced Character Edit slider set".into())
-    } else if l.starts_with("xpmse") {
-        Some("XP32 Maximum Skeleton Extended".into())
-    } else {
-        None
-    }
-}
-
 struct Extracted {
     plugins: Vec<AssetRef>,
     textures: Vec<AssetRef>,
@@ -115,7 +102,6 @@ fn note_ref(map: &mut HashMap<String, AssetRef>, kind: &str, value: &str, sectio
         kind: kind.into(),
         value: value.trim().to_string(),
         appeared_in: Vec::new(),
-        hint: if kind == "morph" { morph_hint(value) } else { None },
     });
     if !entry.appeared_in.iter().any(|s| s == section) {
         entry.appeared_in.push(section.into());
@@ -450,162 +436,172 @@ fn nexus_url(mod_id: u32) -> String {
     format!("https://www.nexusmods.com/{}/mods/{mod_id}", nexus::GAME_DOMAIN)
 }
 
-/// Analyze a preset and resolve every reference to a source mod.
-#[tauri::command]
-pub async fn find_assets(
-    app: tauri::AppHandle,
-    path: String,
-    on_progress: tauri::ipc::Channel<FindProgress>,
-) -> Result<FindAssetsReport, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let settings = settings::load_from_app(&app)?;
-        let api_key = settings.nexus_api_key.trim().to_string();
-        let api_key_present = !api_key.is_empty();
+/// Output of the resolution pass: identified groups plus everything left over.
+pub(crate) struct ResolveOutput {
+    pub identified: Vec<IdentifiedGroup>,
+    pub unknown: Vec<AssetRef>,
+    pub extra_vanilla: Vec<String>,
+    pub api_key_present: bool,
+    pub nexus_error: Option<String>,
+}
 
-        let _ = on_progress.send(FindProgress {
-            stage: "parsing".into(),
-            current: 0,
-            total: 0,
-            detail: "Reading preset".into(),
-        });
-        let preset = jslot::parse_file(Path::new(&path))?;
-        let extracted = extract(&preset);
-        let ctx = build_context(&settings);
+/// Resolve every plugin/texture/morph reference to a source mod. `app` is
+/// `None` for offline/aggregate scans — Nexus lookups are skipped in that
+/// case but local identification still runs. `library` is threaded through
+/// unused for now (see Task 4).
+pub(crate) fn resolve_refs(
+    app: Option<&tauri::AppHandle>,
+    settings: &AppSettings,
+    ctx: &LocalContext,
+    _library: &crate::library::Library,
+    plugins: &[AssetRef],
+    textures: &[AssetRef],
+    morphs: &[AssetRef],
+    progress: &mut dyn FnMut(FindProgress),
+) -> ResolveOutput {
+    let api_key = settings.nexus_api_key.trim().to_string();
+    let api_key_present = !api_key.is_empty();
 
-        let mut groups = Groups::default();
-        let mut unknown: Vec<AssetRef> = Vec::new();
-        let mut vanilla = extracted.vanilla.clone();
-        let mut nexus_error: Option<String> = None;
-        // Once Nexus fails hard (rate limit / network), stop calling it but
-        // keep resolving locally.
-        let mut nexus_down = !api_key_present;
+    let mut groups = Groups::default();
+    let mut unknown: Vec<AssetRef> = Vec::new();
+    let mut extra_vanilla: Vec<String> = Vec::new();
+    let mut nexus_error: Option<String> = None;
+    // Once Nexus fails hard (rate limit / network), stop calling it but
+    // keep resolving locally. No AppHandle (offline/aggregate scans) means
+    // Nexus is never reachable either.
+    let mut nexus_down = !api_key_present || app.is_none();
 
-        let lookup_nexus = |app: &tauri::AppHandle,
-                                nexus_down: &mut bool,
-                                nexus_error: &mut Option<String>,
-                                mod_id: u32|
-         -> Option<NexusModInfo> {
-            if *nexus_down {
-                return None;
-            }
-            match nexus::mod_info(app, &api_key, mod_id) {
-                Ok(info) => info,
-                Err(f) => {
-                    if f.rate_limited {
-                        *nexus_down = true;
-                    }
-                    if nexus_error.is_none() {
-                        *nexus_error = Some(f.message);
-                    }
-                    None
+    let lookup_nexus = |app: Option<&tauri::AppHandle>,
+                            nexus_down: &mut bool,
+                            nexus_error: &mut Option<String>,
+                            mod_id: u32|
+     -> Option<NexusModInfo> {
+        if *nexus_down {
+            return None;
+        }
+        let Some(app) = app else { return None };
+        match nexus::mod_info(app, &api_key, mod_id) {
+            Ok(info) => info,
+            Err(f) => {
+                if f.rate_limited {
+                    *nexus_down = true;
                 }
+                if nexus_error.is_none() {
+                    *nexus_error = Some(f.message);
+                }
+                None
             }
+        }
+    };
+
+    let total = plugins.len() + textures.len();
+    let mut current = 0usize;
+
+    // --- plugins + textures share the same resolution pipeline ---------
+    let mut unresolved_plugins: Vec<AssetRef> = Vec::new();
+    let file_refs = plugins
+        .iter()
+        .map(|r| (r, true))
+        .chain(textures.iter().map(|r| (r, false)));
+    for (asset, is_plugin) in file_refs {
+        current += 1;
+        progress(FindProgress {
+            stage: "resolving".into(),
+            current,
+            total,
+            detail: asset.value.clone(),
+        });
+
+        let hit = if is_plugin {
+            find_plugin(ctx, &asset.value)
+        } else {
+            find_texture(ctx, &asset.value)
+        };
+        let Some(hit) = hit else {
+            if is_plugin {
+                unresolved_plugins.push(asset.clone());
+            } else if asset
+                .value
+                .to_ascii_lowercase()
+                .replace('/', "\\")
+                .starts_with("actors\\character\\")
+            {
+                // Not loose anywhere + a base-game character path: almost
+                // certainly ships in the vanilla BSAs.
+                if !extra_vanilla.iter().any(|v| v.eq_ignore_ascii_case(&asset.value)) {
+                    extra_vanilla.push(asset.value.clone());
+                }
+            } else {
+                unknown.push(asset.clone());
+            }
+            continue;
         };
 
-        let total = extracted.plugins.len() + extracted.textures.len();
-        let mut current = 0usize;
+        // 1. MO2 meta.ini — cheapest, no network.
+        let meta_id = hit
+            .mod_folder_path
+            .as_deref()
+            .filter(|_| settings.mod_manager == ModManagerKind::Mo2)
+            .and_then(meta_ini_mod_id);
+        if let Some(mod_id) = meta_id {
+            let info = lookup_nexus(app, &mut nexus_down, &mut nexus_error, mod_id);
+            groups.add(
+                format!("nexus:{mod_id}"),
+                || IdentifiedGroup {
+                    mod_id: Some(mod_id),
+                    nexus: info,
+                    mod_folder: hit.mod_folder.clone(),
+                    resolved_by: "meta.ini".into(),
+                    page_url: Some(nexus_url(mod_id)),
+                    name: None,
+                    library_source: None,
+                    assets: Vec::new(),
+                },
+                asset,
+            );
+            continue;
+        }
 
-        // --- plugins + textures share the same resolution pipeline ---------
-        let mut unresolved_plugins: Vec<AssetRef> = Vec::new();
-        let file_refs = extracted
-            .plugins
-            .iter()
-            .map(|r| (r, true))
-            .chain(extracted.textures.iter().map(|r| (r, false)));
-        for (asset, is_plugin) in file_refs {
-            current += 1;
-            let _ = on_progress.send(FindProgress {
-                stage: "resolving".into(),
-                current,
-                total,
-                detail: asset.value.clone(),
-            });
-
-            let hit = if is_plugin {
-                find_plugin(&ctx, &asset.value)
-            } else {
-                find_texture(&ctx, &asset.value)
-            };
-            let Some(hit) = hit else {
-                if is_plugin {
-                    unresolved_plugins.push(asset.clone());
-                } else if asset
-                    .value
-                    .to_ascii_lowercase()
-                    .replace('/', "\\")
-                    .starts_with("actors\\character\\")
-                {
-                    // Not loose anywhere + a base-game character path: almost
-                    // certainly ships in the vanilla BSAs.
-                    if !vanilla.iter().any(|v| v.eq_ignore_ascii_case(&asset.value)) {
-                        vanilla.push(asset.value.clone());
-                    }
-                } else {
-                    unknown.push(asset.clone());
-                }
-                continue;
-            };
-
-            // 1. MO2 meta.ini — cheapest, no network.
-            let meta_id = hit
-                .mod_folder_path
-                .as_deref()
-                .filter(|_| settings.mod_manager == ModManagerKind::Mo2)
-                .and_then(meta_ini_mod_id);
-            if let Some(mod_id) = meta_id {
-                let info = lookup_nexus(&app, &mut nexus_down, &mut nexus_error, mod_id);
+        // 3. Vortex deployment manifest (before hashing: cheaper).
+        if hit.in_data && !ctx.vortex_map.is_empty() {
+            let rel = hit.data_rel.clone().unwrap_or_default().to_ascii_lowercase();
+            if let Some(source) = ctx.vortex_map.get(&rel) {
+                let mod_id = vortex_folder_mod_id(source);
+                let info = mod_id
+                    .and_then(|id| lookup_nexus(app, &mut nexus_down, &mut nexus_error, id));
+                let key = mod_id
+                    .map(|id| format!("nexus:{id}"))
+                    .unwrap_or_else(|| format!("folder:{}", source.to_ascii_lowercase()));
                 groups.add(
-                    format!("nexus:{mod_id}"),
+                    key,
                     || IdentifiedGroup {
-                        mod_id: Some(mod_id),
+                        mod_id,
                         nexus: info,
-                        mod_folder: hit.mod_folder.clone(),
-                        resolved_by: "meta.ini".into(),
-                        nexus_url: Some(nexus_url(mod_id)),
+                        mod_folder: Some(source.clone()),
+                        resolved_by: "vortex-manifest".into(),
+                        page_url: mod_id.map(nexus_url),
+                        name: None,
+                        library_source: None,
                         assets: Vec::new(),
                     },
                     asset,
                 );
                 continue;
             }
+        }
 
-            // 3. Vortex deployment manifest (before hashing: cheaper).
-            if hit.in_data && !ctx.vortex_map.is_empty() {
-                let rel = hit.data_rel.clone().unwrap_or_default().to_ascii_lowercase();
-                if let Some(source) = ctx.vortex_map.get(&rel) {
-                    let mod_id = vortex_folder_mod_id(source);
-                    let info = mod_id
-                        .and_then(|id| lookup_nexus(&app, &mut nexus_down, &mut nexus_error, id));
-                    let key = mod_id
-                        .map(|id| format!("nexus:{id}"))
-                        .unwrap_or_else(|| format!("folder:{}", source.to_ascii_lowercase()));
-                    groups.add(
-                        key,
-                        || IdentifiedGroup {
-                            mod_id,
-                            nexus: info,
-                            mod_folder: Some(source.clone()),
-                            resolved_by: "vortex-manifest".into(),
-                            nexus_url: mod_id.map(nexus_url),
-                            assets: Vec::new(),
-                        },
-                        asset,
-                    );
-                    continue;
-                }
-            }
-
-            // 2. MD5 hash + Nexus lookup — the most reliable network path.
-            let mut resolved = false;
-            if !nexus_down {
-                let _ = on_progress.send(FindProgress {
+        // 2. MD5 hash + Nexus lookup — the most reliable network path.
+        let mut resolved = false;
+        if !nexus_down {
+            if let Some(app) = app {
+                progress(FindProgress {
                     stage: "nexus".into(),
                     current,
                     total,
                     detail: format!("Checking Nexus for {}", asset.value),
                 });
                 if let Some(hash) = md5_of_file(&hit.file) {
-                    match nexus::md5_lookup(&app, &api_key, &hash) {
+                    match nexus::md5_lookup(app, &api_key, &hash) {
                         Ok(Some(info)) => {
                             let mod_id = info.mod_id;
                             groups.add(
@@ -615,7 +611,9 @@ pub async fn find_assets(
                                     nexus: Some(info),
                                     mod_folder: hit.mod_folder.clone(),
                                     resolved_by: "md5".into(),
-                                    nexus_url: Some(nexus_url(mod_id)),
+                                    page_url: Some(nexus_url(mod_id)),
+                                    name: None,
+                                    library_source: None,
                                     assets: Vec::new(),
                                 },
                                 asset,
@@ -634,68 +632,125 @@ pub async fn find_assets(
                     }
                 }
             }
-            if resolved {
-                continue;
-            }
-
-            // Local attribution without Nexus: still valuable.
-            match &hit.mod_folder {
-                Some(folder) => {
-                    groups.add(
-                        format!("folder:{}", folder.to_ascii_lowercase()),
-                        || IdentifiedGroup {
-                            mod_id: None,
-                            nexus: None,
-                            mod_folder: Some(folder.clone()),
-                            resolved_by: "local-folder".into(),
-                            nexus_url: None,
-                            assets: Vec::new(),
-                        },
-                        asset,
-                    );
-                }
-                None => unknown.push(asset.clone()),
-            }
+        }
+        if resolved {
+            continue;
         }
 
-        // 4. Plugin-name heuristics: match unfound plugins against
-        // already-identified mod folders by name.
-        for asset in unresolved_plugins {
-            let stem = asset
-                .value
-                .rsplit_once('.')
-                .map(|(s, _)| s)
-                .unwrap_or(&asset.value)
-                .to_ascii_lowercase();
-            let matched_key = groups
-                .map
-                .iter()
-                .find(|(_, g)| {
-                    g.mod_folder
-                        .as_deref()
-                        .map(|f| {
-                            let f = f.to_ascii_lowercase();
-                            f.contains(&stem) || stem.contains(&f)
-                        })
-                        .unwrap_or(false)
-                })
-                .map(|(k, _)| k.clone());
-            match matched_key {
-                Some(key) => groups.add(key, || unreachable!("existing key"), &asset),
-                None => unknown.push(asset),
+        // Local attribution without Nexus: still valuable.
+        match &hit.mod_folder {
+            Some(folder) => {
+                groups.add(
+                    format!("folder:{}", folder.to_ascii_lowercase()),
+                    || IdentifiedGroup {
+                        mod_id: None,
+                        nexus: None,
+                        mod_folder: Some(folder.clone()),
+                        resolved_by: "local-folder".into(),
+                        page_url: None,
+                        name: None,
+                        library_source: None,
+                        assets: Vec::new(),
+                    },
+                    asset,
+                );
             }
+            None => unknown.push(asset.clone()),
         }
+    }
 
-        // Morphs resolve to sliders, not files — Unknown with hints.
-        unknown.extend(extracted.morphs.iter().cloned());
+    // 4. Plugin-name heuristics: match unfound plugins against
+    // already-identified mod folders by name.
+    for asset in unresolved_plugins {
+        let stem = asset
+            .value
+            .rsplit_once('.')
+            .map(|(s, _)| s)
+            .unwrap_or(&asset.value)
+            .to_ascii_lowercase();
+        let matched_key = groups
+            .map
+            .iter()
+            .find(|(_, g)| {
+                g.mod_folder
+                    .as_deref()
+                    .map(|f| {
+                        let f = f.to_ascii_lowercase();
+                        f.contains(&stem) || stem.contains(&f)
+                    })
+                    .unwrap_or(false)
+            })
+            .map(|(k, _)| k.clone());
+        match matched_key {
+            Some(key) => groups.add(key, || unreachable!("existing key"), &asset),
+            None => unknown.push(asset),
+        }
+    }
+
+    // Morphs resolve to sliders, not files — straight to Unknown.
+    unknown.extend(morphs.iter().cloned());
+
+    ResolveOutput {
+        identified: groups.into_vec(),
+        unknown,
+        extra_vanilla,
+        api_key_present,
+        nexus_error,
+    }
+}
+
+/// Analyze a preset and resolve every reference to a source mod.
+#[tauri::command]
+pub async fn find_assets(
+    app: tauri::AppHandle,
+    path: String,
+    on_progress: tauri::ipc::Channel<FindProgress>,
+) -> Result<FindAssetsReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = settings::load_from_app(&app)?;
+
+        let _ = on_progress.send(FindProgress {
+            stage: "parsing".into(),
+            current: 0,
+            total: 0,
+            detail: "Reading preset".into(),
+        });
+        let preset = jslot::parse_file(Path::new(&path))?;
+        let extracted = extract(&preset);
+        let ctx = build_context(&settings);
+
+        let config_dir = {
+            use tauri::Manager;
+            app.path()
+                .app_config_dir()
+                .map_err(|e| format!("failed to resolve app config dir: {e}"))?
+        };
+        let library = crate::library::load_from_dir(&config_dir);
+
+        let mut progress = |p: FindProgress| {
+            let _ = on_progress.send(p);
+        };
+        let output = resolve_refs(
+            Some(&app),
+            &settings,
+            &ctx,
+            &library,
+            &extracted.plugins,
+            &extracted.textures,
+            &extracted.morphs,
+            &mut progress,
+        );
+
+        let mut vanilla = extracted.vanilla;
+        vanilla.extend(output.extra_vanilla);
 
         Ok(FindAssetsReport {
             preset_path: path,
-            identified: groups.into_vec(),
-            unknown,
+            identified: output.identified,
+            unknown: output.unknown,
             vanilla,
-            api_key_present,
-            nexus_error,
+            api_key_present: output.api_key_present,
+            nexus_error: output.nexus_error,
             rate_limit: nexus::get_rate_limit(),
         })
     })
@@ -732,7 +787,6 @@ mod tests {
         assert!(tex.contains(&"Actors\\Character\\Custom\\tint.dds"));
         assert!(tex.contains(&"custom\\thing.dds"));
         assert_eq!(e.morphs.len(), 1);
-        assert!(e.morphs[0].hint.as_deref().unwrap().contains("Expressive"));
         // headParts + modNames both list High Poly Head.esm — merged, both sections noted.
         let hph = e
             .plugins

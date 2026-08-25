@@ -58,7 +58,7 @@
 
   const fileName = $derived(selectedPath?.split(/[\\/]/).pop() ?? "");
   const groupTitle = (g: NonNullable<typeof report>["identified"][number]) =>
-    g.nexus?.name ?? g.mod_folder ?? "Unknown mod";
+    g.name ?? g.nexus?.name ?? g.mod_folder ?? "Unknown mod";
 </script>
 
 <PageHeader
@@ -149,9 +149,9 @@
                         </li>
                       {/each}
                     </ul>
-                    {#if group.nexus_url}
-                      <button type="button" class="btn btn-ghost btn-sm nexus-btn" onclick={() => openExternal(group.nexus_url!)}>
-                        <ExternalLink size={13} /> Open on Nexus
+                    {#if group.page_url}
+                      <button type="button" class="btn btn-ghost btn-sm nexus-btn" onclick={() => openExternal(group.page_url!)}>
+                        <ExternalLink size={13} /> {group.page_url.includes("nexusmods.com") ? "Open on Nexus" : "Open page"}
                       </button>
                     {/if}
                   </div>
@@ -175,9 +175,6 @@
                     <span class="chip-kind">{asset.kind}</span>
                     <span class="mono val">{asset.value}</span>
                     <span class="where">in {asset.appeared_in.join(", ")}</span>
-                    {#if asset.hint}
-                      <span class="hint-chip" title="Best guess from the name">{asset.hint}</span>
-                    {/if}
                   </div>
                   <button type="button" class="btn btn-ghost btn-sm" onclick={() => searchWeb(asset.value)}>
                     <Globe size={13} /> Search the web
@@ -404,13 +401,6 @@
   .where {
     font-size: 10.5px;
     color: var(--sf-text-off);
-  }
-  .hint-chip {
-    font-size: 10px;
-    color: var(--sf-warning);
-    background: var(--sf-warning-soft);
-    border-radius: var(--sf-r-full);
-    padding: 1px 8px;
   }
   .vanilla summary {
     cursor: pointer;

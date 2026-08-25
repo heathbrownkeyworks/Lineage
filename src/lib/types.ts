@@ -230,15 +230,16 @@ export type AssetRef = {
   kind: "plugin" | "texture" | "morph";
   value: string;
   appeared_in: string[];
-  hint: string | null;
 };
 
 export type IdentifiedGroup = {
   mod_id: number | null;
   nexus: NexusModInfo | null;
   mod_folder: string | null;
-  resolved_by: "meta.ini" | "md5" | "vortex-manifest" | "heuristic" | "local-folder";
-  nexus_url: string | null;
+  resolved_by: "meta.ini" | "md5" | "vortex-manifest" | "heuristic" | "local-folder" | "library";
+  page_url: string | null;
+  name: string | null;
+  library_source: "seed" | "user" | null;
   assets: AssetRef[];
 };
 
