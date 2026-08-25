@@ -63,6 +63,9 @@ pub struct FindAssetsReport {
     /// local identification still ran.
     pub nexus_error: Option<String>,
     pub rate_limit: Option<RateLimitInfo>,
+    /// Set when the user's library.json was unreadable — the app ran with
+    /// seed entries only for this scan.
+    pub library_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -436,6 +439,71 @@ fn nexus_url(mod_id: u32) -> String {
     format!("https://www.nexusmods.com/{}/mods/{mod_id}", nexus::GAME_DOMAIN)
 }
 
+/// Build (or add to) a `resolved_by: "library"` group for a library hit.
+/// When the entry's URL is a Nexus mod page and Nexus is reachable, enrich
+/// with `nexus::mod_info` — failures degrade silently, same pattern as
+/// `lookup_nexus` in `resolve_refs`. The entry's own `name` always wins over
+/// whatever Nexus reports.
+fn add_library_group(
+    groups: &mut Groups,
+    hit: &crate::library::MergedEntry,
+    asset: &AssetRef,
+    app: Option<&tauri::AppHandle>,
+    api_key: &str,
+    nexus_down: &mut bool,
+    nexus_error: &mut Option<String>,
+) {
+    let mod_id = crate::library::nexus_mod_id_from_url(&hit.entry.url);
+    let info = match (mod_id, *nexus_down, app) {
+        (Some(id), false, Some(app)) => match nexus::mod_info(app, api_key, id) {
+            Ok(info) => info,
+            Err(f) => {
+                if f.rate_limited {
+                    *nexus_down = true;
+                }
+                if nexus_error.is_none() {
+                    *nexus_error = Some(f.message);
+                }
+                None
+            }
+        },
+        _ => None,
+    };
+    groups.add(
+        format!("library:{}", hit.entry.id),
+        || IdentifiedGroup {
+            mod_id,
+            nexus: info,
+            mod_folder: None,
+            resolved_by: "library".into(),
+            page_url: Some(hit.entry.url.clone()),
+            name: Some(hit.entry.name.clone()),
+            library_source: Some(hit.source.clone()),
+            assets: Vec::new(),
+        },
+        asset,
+    );
+}
+
+/// Push `asset` into `unknown` unless a library entry (seed or user; the
+/// user-only precedence pass already ran earlier) claims it first.
+#[allow(clippy::too_many_arguments)]
+fn unknown_or_library(
+    groups: &mut Groups,
+    unknown: &mut Vec<AssetRef>,
+    library: &crate::library::Library,
+    asset: &AssetRef,
+    app: Option<&tauri::AppHandle>,
+    api_key: &str,
+    nexus_down: &mut bool,
+    nexus_error: &mut Option<String>,
+) {
+    match library.match_entry(&asset.kind, &asset.value, false) {
+        Some(hit) => add_library_group(groups, hit, asset, app, api_key, nexus_down, nexus_error),
+        None => unknown.push(asset.clone()),
+    }
+}
+
 /// Output of the resolution pass: identified groups plus everything left over.
 pub(crate) struct ResolveOutput {
     pub identified: Vec<IdentifiedGroup>,
@@ -447,13 +515,19 @@ pub(crate) struct ResolveOutput {
 
 /// Resolve every plugin/texture/morph reference to a source mod. `app` is
 /// `None` for offline/aggregate scans — Nexus lookups are skipped in that
-/// case but local identification still runs. `library` is threaded through
-/// unused for now (see Task 4).
+/// case but local identification still runs.
+///
+/// Precedence: (1) a user library entry beats everything, checked before the
+/// automatic pipeline even runs; (2) the automatic pipeline (meta.ini, MD5,
+/// Vortex manifest, local-folder, plugin-name heuristics) runs unchanged;
+/// (3) a seed/any library entry claims refs that would otherwise land in
+/// Unknown; (4) after every ref is resolved, any group still missing a
+/// `page_url` borrows one from a library entry matching one of its assets.
 pub(crate) fn resolve_refs(
     app: Option<&tauri::AppHandle>,
     settings: &AppSettings,
     ctx: &LocalContext,
-    _library: &crate::library::Library,
+    library: &crate::library::Library,
     plugins: &[AssetRef],
     textures: &[AssetRef],
     morphs: &[AssetRef],
@@ -512,6 +586,12 @@ pub(crate) fn resolve_refs(
             detail: asset.value.clone(),
         });
 
+        // 0. User library override — beats the automatic pipeline entirely.
+        if let Some(hit) = library.match_entry(&asset.kind, &asset.value, true) {
+            add_library_group(&mut groups, hit, asset, app, &api_key, &mut nexus_down, &mut nexus_error);
+            continue;
+        }
+
         let hit = if is_plugin {
             find_plugin(ctx, &asset.value)
         } else {
@@ -532,7 +612,16 @@ pub(crate) fn resolve_refs(
                     extra_vanilla.push(asset.value.clone());
                 }
             } else {
-                unknown.push(asset.clone());
+                unknown_or_library(
+                    &mut groups,
+                    &mut unknown,
+                    library,
+                    asset,
+                    app,
+                    &api_key,
+                    &mut nexus_down,
+                    &mut nexus_error,
+                );
             }
             continue;
         };
@@ -655,7 +744,16 @@ pub(crate) fn resolve_refs(
                     asset,
                 );
             }
-            None => unknown.push(asset.clone()),
+            None => unknown_or_library(
+                &mut groups,
+                &mut unknown,
+                library,
+                asset,
+                app,
+                &api_key,
+                &mut nexus_down,
+                &mut nexus_error,
+            ),
         }
     }
 
@@ -683,12 +781,57 @@ pub(crate) fn resolve_refs(
             .map(|(k, _)| k.clone());
         match matched_key {
             Some(key) => groups.add(key, || unreachable!("existing key"), &asset),
-            None => unknown.push(asset),
+            None => unknown_or_library(
+                &mut groups,
+                &mut unknown,
+                library,
+                &asset,
+                app,
+                &api_key,
+                &mut nexus_down,
+                &mut nexus_error,
+            ),
         }
     }
 
-    // Morphs resolve to sliders, not files — straight to Unknown.
-    unknown.extend(morphs.iter().cloned());
+    // Morphs resolve to sliders, not files — a user override, then a
+    // seed/any library entry, else Unknown.
+    for asset in morphs {
+        if let Some(hit) = library.match_entry(&asset.kind, &asset.value, true) {
+            add_library_group(&mut groups, hit, asset, app, &api_key, &mut nexus_down, &mut nexus_error);
+            continue;
+        }
+        unknown_or_library(
+            &mut groups,
+            &mut unknown,
+            library,
+            asset,
+            app,
+            &api_key,
+            &mut nexus_down,
+            &mut nexus_error,
+        );
+    }
+
+    // Link attachment: any group the automatic pipeline identified but
+    // couldn't give a page link (e.g. local-folder) borrows one from a
+    // library entry matching one of its assets. resolved_by/mod_id/nexus
+    // stay untouched — only the link fields change.
+    for key in groups.order.clone() {
+        let group = groups.map.get_mut(&key).expect("key from order");
+        if group.page_url.is_some() {
+            continue;
+        }
+        if let Some(hit) = group
+            .assets
+            .iter()
+            .find_map(|a| library.match_entry(&a.kind, &a.value, false))
+        {
+            group.page_url = Some(hit.entry.url.clone());
+            group.name = Some(hit.entry.name.clone());
+            group.library_source = Some(hit.source.clone());
+        }
+    }
 
     ResolveOutput {
         identified: groups.into_vec(),
@@ -697,6 +840,19 @@ pub(crate) fn resolve_refs(
         api_key_present,
         nexus_error,
     }
+}
+
+/// Test entry point: the resolver with Nexus disabled (no AppHandle needed).
+#[cfg(test)]
+pub(crate) fn resolve_refs_offline(
+    settings: &AppSettings,
+    ctx: &LocalContext,
+    library: &crate::library::Library,
+    plugins: &[AssetRef],
+    textures: &[AssetRef],
+    morphs: &[AssetRef],
+) -> ResolveOutput {
+    resolve_refs(None, settings, ctx, library, plugins, textures, morphs, &mut |_| {})
 }
 
 /// Analyze a preset and resolve every reference to a source mod.
@@ -752,6 +908,7 @@ pub async fn find_assets(
             api_key_present: output.api_key_present,
             nexus_error: output.nexus_error,
             rate_limit: nexus::get_rate_limit(),
+            library_warning: library.warning,
         })
     })
     .await
@@ -813,6 +970,85 @@ mod tests {
         assert_eq!(meta_ini_mod_id(&dir), Some(47828));
         std::fs::write(dir.join("meta.ini"), "[General]\nmodid=-1\n").unwrap();
         assert_eq!(meta_ini_mod_id(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn library_precedence_user_overrides_seed_fills_and_attaches() {
+        use crate::library::{Library, LibraryEntry, MergedEntry};
+        use crate::settings::AppSettings;
+
+        let dir = std::env::temp_dir().join(format!("lineage-resolve-lib-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A mod folder providing one plugin → automatic local-folder attribution.
+        let mods = dir.join("mods");
+        std::fs::create_dir_all(mods.join("Some Hair Mod")).unwrap();
+        std::fs::write(mods.join("Some Hair Mod").join("Hair.esp"), b"x").unwrap();
+
+        let settings = AppSettings {
+            mod_manager: crate::settings::ModManagerKind::Mo2,
+            mo2_mods_folder: mods.display().to_string(),
+            ..Default::default()
+        };
+        let ctx = build_context(&settings);
+
+        let mk = |id: &str, source: &str, kind: &str, pattern: &str, match_type: &str, name: &str| MergedEntry {
+            entry: LibraryEntry {
+                id: id.into(), kind: kind.into(), pattern: pattern.into(),
+                match_type: match_type.into(), name: name.into(),
+                url: format!("https://example.com/{id}"),
+            },
+            source: source.into(),
+            enabled: true,
+        };
+        let library = Library {
+            entries: vec![
+                // User override for the plugin the pipeline WOULD identify locally.
+                mk("user-hair", "user", "plugin", "Hair.esp", "exact", "Corrected Hair Mod"),
+                // Seed for an otherwise-unknown morph family.
+                mk("seed-efm", "seed", "morph", "EFM_", "prefix", "Expressive Facegen Morphs"),
+                // Seed matching the SAME plugin — must NOT override the user entry.
+                mk("seed-hair", "seed", "plugin", "Hair.esp", "exact", "Wrong Seed Name"),
+                // Seed that attaches a link to a URL-less local-folder group.
+                mk("seed-other", "seed", "plugin", "Other.esp", "exact", "Other Mod"),
+            ],
+            warning: None,
+        };
+
+        std::fs::write(mods.join("Some Hair Mod").join("Other.esp"), b"y").unwrap();
+        let refs = |kind: &str, value: &str| AssetRef {
+            kind: kind.into(), value: value.into(), appeared_in: vec!["test".into()],
+        };
+        let plugins = vec![refs("plugin", "Hair.esp"), refs("plugin", "Other.esp"), refs("plugin", "Missing.esp")];
+        let morphs = vec![refs("morph", "EFM_Brow_Width"), refs("morph", "Totally_Custom")];
+
+        // No API key: app handle unused on the no-network path — pass via the
+        // test-only entry point resolve_refs_offline.
+        let out = resolve_refs_offline(&settings, &ctx, &library, &plugins, &[], &morphs);
+
+        // 1. User entry wins for Hair.esp even though local attribution existed.
+        let hair = out.identified.iter().find(|g| g.assets.iter().any(|a| a.value == "Hair.esp")).unwrap();
+        assert_eq!(hair.resolved_by, "library");
+        assert_eq!(hair.name.as_deref(), Some("Corrected Hair Mod"));
+        assert_eq!(hair.library_source.as_deref(), Some("user"));
+        assert_eq!(hair.page_url.as_deref(), Some("https://example.com/user-hair"));
+
+        // 2. Seed claims the otherwise-unknown morph; the custom morph stays unknown.
+        let efm = out.identified.iter().find(|g| g.name.as_deref() == Some("Expressive Facegen Morphs")).unwrap();
+        assert_eq!(efm.library_source.as_deref(), Some("seed"));
+        assert!(out.unknown.iter().any(|a| a.value == "Totally_Custom"));
+        assert!(out.unknown.iter().all(|a| a.value != "EFM_Brow_Width"));
+
+        // 3. Seed attaches its link to the URL-less local-folder group for Other.esp
+        //    WITHOUT changing resolved_by.
+        let other = out.identified.iter().find(|g| g.assets.iter().any(|a| a.value == "Other.esp")).unwrap();
+        assert_eq!(other.resolved_by, "local-folder");
+        assert_eq!(other.page_url.as_deref(), Some("https://example.com/seed-other"));
+        assert_eq!(other.name.as_deref(), Some("Other Mod"));
+
+        // 4. A plugin nothing matches stays unknown.
+        assert!(out.unknown.iter().any(|a| a.value == "Missing.esp"));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

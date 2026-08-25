@@ -251,6 +251,7 @@ export type FindAssetsReport = {
   api_key_present: boolean;
   nexus_error: string | null;
   rate_limit: RateLimitInfo | null;
+  library_warning: string | null;
 };
 
 export type FindProgress = {
