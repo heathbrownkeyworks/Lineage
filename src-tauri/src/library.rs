@@ -115,14 +115,18 @@ impl Library {
     /// longer prefix beats shorter, user beats seed. `user_only` restricts to
     /// user entries (the override layer that beats the automatic pipeline).
     pub fn match_entry(&self, kind: &str, value: &str, user_only: bool) -> Option<&MergedEntry> {
-        let value_l = value.to_ascii_lowercase();
+        // Normalize slashes unconditionally: plugin/morph patterns and
+        // values never contain slashes, so this only affects texture refs,
+        // where a forward-slash value must still hit a backslash pattern
+        // (and vice versa).
+        let value_l = value.to_ascii_lowercase().replace('/', "\\");
         self.entries
             .iter()
             .filter(|m| m.enabled)
             .filter(|m| !user_only || m.source == "user")
             .filter(|m| m.entry.kind.eq_ignore_ascii_case(kind))
             .filter(|m| {
-                let p = m.entry.pattern.to_ascii_lowercase();
+                let p = m.entry.pattern.to_ascii_lowercase().replace('/', "\\");
                 match m.entry.match_type.as_str() {
                     "prefix" => value_l.starts_with(&p),
                     _ => value_l == p,
@@ -172,41 +176,70 @@ fn validate(entry: &LibraryEntry) -> Result<(), String> {
     }
 }
 
-pub fn upsert_entries(config_dir: &Path, entries: Vec<LibraryEntry>) -> Result<(), String> {
-    let (mut file, _) = load_user_file(config_dir);
-    for mut e in entries {
-        validate(&e)?;
-        if e.id.trim().is_empty() {
+/// Shared by every write path: load the user file, apply `mutate`, then
+/// save. If the load reported a corruption warning, the unreadable file is
+/// first renamed aside to `library.json.invalid-<unix-millis>` so the fresh
+/// write below doesn't silently destroy the user's damaged-but-recoverable
+/// data — `load_user_file`'s warning text tells them to "fix or delete" it,
+/// which is only true if a write doesn't get there first.
+fn write_user_file(
+    config_dir: &Path,
+    mutate: impl FnOnce(&mut UserLibraryFile),
+) -> Result<(), String> {
+    let (mut file, warning) = load_user_file(config_dir);
+    if warning.is_some() {
+        let path = user_file_path(config_dir);
+        if path.exists() {
             let millis = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis())
                 .unwrap_or(0);
-            e.id = format!("user-{millis}-{}", file.entries.len());
+            let aside = config_dir.join(format!("library.json.invalid-{millis}"));
+            std::fs::rename(&path, &aside)
+                .map_err(|e| format!("preserve unreadable library file: {e}"))?;
         }
-        // Replace by id, else by shadow key (same kind+match+pattern).
-        file.entries
-            .retain(|x| x.id != e.id && shadow_key(x) != shadow_key(&e));
-        file.entries.push(e);
     }
+    mutate(&mut file);
     save_user_file(config_dir, &file)
+}
+
+pub fn upsert_entries(config_dir: &Path, entries: Vec<LibraryEntry>) -> Result<(), String> {
+    for e in &entries {
+        validate(e)?;
+    }
+    write_user_file(config_dir, |file| {
+        for mut e in entries {
+            if e.id.trim().is_empty() {
+                let millis = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                e.id = format!("user-{millis}-{}", file.entries.len());
+            }
+            // Replace by id, else by shadow key (same kind+match+pattern).
+            file.entries
+                .retain(|x| x.id != e.id && shadow_key(x) != shadow_key(&e));
+            file.entries.push(e);
+        }
+    })
 }
 
 pub fn delete_entry(config_dir: &Path, id: &str) -> Result<(), String> {
-    let (mut file, _) = load_user_file(config_dir);
-    if id.starts_with("seed-") {
-        if !file.disabled_seed_ids.iter().any(|x| x == id) {
-            file.disabled_seed_ids.push(id.to_string());
+    write_user_file(config_dir, |file| {
+        if id.starts_with("seed-") {
+            if !file.disabled_seed_ids.iter().any(|x| x == id) {
+                file.disabled_seed_ids.push(id.to_string());
+            }
+        } else {
+            file.entries.retain(|x| x.id != id);
         }
-    } else {
-        file.entries.retain(|x| x.id != id);
-    }
-    save_user_file(config_dir, &file)
+    })
 }
 
 pub fn restore_seed(config_dir: &Path, id: &str) -> Result<(), String> {
-    let (mut file, _) = load_user_file(config_dir);
-    file.disabled_seed_ids.retain(|x| x != id);
-    save_user_file(config_dir, &file)
+    write_user_file(config_dir, |file| {
+        file.disabled_seed_ids.retain(|x| x != id);
+    })
 }
 
 fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -386,6 +419,53 @@ mod tests {
         // user_only skips seed entries.
         assert!(lib.match_entry("morph", "EFM_Brow_Width", true).is_none());
         assert!(lib.match_entry("morph", "EFM_Brow_Width", false).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_user_file_is_preserved_aside_by_a_write() {
+        let dir = temp_dir("corrupt-write");
+        std::fs::write(user_file_path(&dir), b"{ not json").unwrap();
+
+        upsert_entries(&dir, vec![user_entry("", "plugin", "New.esp", "exact")]).unwrap();
+
+        // The new library.json contains only the new entry — no warning now
+        // that it round-trips as valid JSON.
+        let (file, warning) = load_user_file(&dir);
+        assert!(warning.is_none());
+        assert_eq!(file.entries.len(), 1);
+        assert_eq!(file.entries[0].pattern, "New.esp");
+
+        // The user's damaged-but-recoverable original survives on disk as a
+        // sibling file instead of being silently clobbered.
+        let sibling = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| e.file_name().to_string_lossy().starts_with("library.json.invalid-"))
+            .expect("corrupt library.json preserved aside");
+        assert_eq!(std::fs::read(sibling.path()).unwrap(), b"{ not json");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn match_entry_normalizes_forward_slashes_in_texture_values() {
+        let dir = temp_dir("slash-normalize");
+        let file = UserLibraryFile {
+            entries: vec![user_entry(
+                "user-1",
+                "texture",
+                "Actors\\Character\\Overlays\\Foo\\",
+                "prefix",
+            )],
+            disabled_seed_ids: vec![],
+        };
+        save_user_file(&dir, &file).unwrap();
+        let lib = load_from_dir(&dir);
+        // Forward-slash value still hits the backslash-pattern prefix.
+        let hit = lib
+            .match_entry("texture", "actors/character/overlays/foo/bar.dds", false)
+            .unwrap();
+        assert_eq!(hit.entry.id, "user-1");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

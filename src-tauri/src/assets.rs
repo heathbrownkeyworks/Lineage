@@ -613,28 +613,31 @@ pub(crate) fn resolve_refs(
         let Some(hit) = hit else {
             if is_plugin {
                 unresolved_plugins.push(asset.clone());
-            } else if asset
-                .value
-                .to_ascii_lowercase()
-                .replace('/', "\\")
-                .starts_with("actors\\character\\")
-            {
-                // Not loose anywhere + a base-game character path: almost
-                // certainly ships in the vanilla BSAs.
-                if !extra_vanilla.iter().any(|v| v.eq_ignore_ascii_case(&asset.value)) {
-                    extra_vanilla.push(asset.value.clone());
-                }
             } else {
-                unknown_or_library(
-                    &mut groups,
-                    &mut unknown,
-                    library,
-                    asset,
-                    app,
-                    &api_key,
-                    &mut nexus_down,
-                    &mut nexus_error,
-                );
+                let normalized_texture = asset.value.to_ascii_lowercase().replace('/', "\\");
+                let vanilla_shaped = normalized_texture.starts_with("actors\\character\\")
+                    && !normalized_texture.starts_with("actors\\character\\overlays\\");
+                if vanilla_shaped {
+                    // Not loose anywhere + a base-game character path: almost
+                    // certainly ships in the vanilla BSAs. RaceMenu overlays
+                    // (Actors\Character\Overlays\...) are excluded — they
+                    // never ship in vanilla BSAs, so an unfound one must
+                    // still fall through to the library gap-fill below.
+                    if !extra_vanilla.iter().any(|v| v.eq_ignore_ascii_case(&asset.value)) {
+                        extra_vanilla.push(asset.value.clone());
+                    }
+                } else {
+                    unknown_or_library(
+                        &mut groups,
+                        &mut unknown,
+                        library,
+                        asset,
+                        app,
+                        &api_key,
+                        &mut nexus_down,
+                        &mut nexus_error,
+                    );
+                }
             }
             continue;
         };
@@ -1385,6 +1388,18 @@ mod tests {
                 mk("seed-vanilla-tex", "seed", "texture", "Actors\\Character\\FooBar.dds", "exact", "Should Not Claim Vanilla"),
                 // (c) Seed entry for a non-vanilla texture resolved nowhere else.
                 mk("seed-tex", "seed", "texture", "custom\\seedtex.dds", "exact", "Seed Texture Mod"),
+                // (d) Seed entry for a RaceMenu overlay texture — despite
+                // starting with Actors\Character\, overlays never ship in
+                // vanilla BSAs and must gap-fill from the seed instead of
+                // being swallowed by the vanilla-shape gate.
+                mk(
+                    "seed-overlay-tex",
+                    "seed",
+                    "texture",
+                    "Actors\\Character\\Overlays\\FooOverlay\\",
+                    "prefix",
+                    "Overlay Seed Mod",
+                ),
             ],
             warning: None,
         };
@@ -1396,6 +1411,7 @@ mod tests {
             refs("texture", "hair\\uservalue.dds"),
             refs("texture", "Actors\\Character\\FooBar.dds"),
             refs("texture", "custom\\seedtex.dds"),
+            refs("texture", "Actors\\Character\\Overlays\\FooOverlay\\tex.dds"),
         ];
 
         let out = resolve_refs_offline(&settings, &ctx, &library, &[], &textures, &[]);
@@ -1421,6 +1437,15 @@ mod tests {
         assert_eq!(seed_tex.resolved_by, "library");
         assert_eq!(seed_tex.library_source.as_deref(), Some("seed"));
         assert!(seed_tex.assets.iter().any(|a| a.value == "custom\\seedtex.dds"));
+
+        // (d) An overlay texture is excluded from the vanilla-shape gate —
+        // it resolves via the seed entry instead of being misclassified as
+        // "ships in vanilla BSAs".
+        let overlay_tex = out.identified.iter().find(|g| g.name.as_deref() == Some("Overlay Seed Mod")).unwrap();
+        assert_eq!(overlay_tex.resolved_by, "library");
+        assert_eq!(overlay_tex.library_source.as_deref(), Some("seed"));
+        assert!(overlay_tex.assets.iter().any(|a| a.value == "Actors\\Character\\Overlays\\FooOverlay\\tex.dds"));
+        assert!(out.extra_vanilla.iter().all(|v| !v.to_ascii_lowercase().contains("overlays")));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -86,6 +86,20 @@
     }
   }
 
+  function shadowKey(e: MergedEntry): string {
+    return `${e.kind.toLowerCase()}|${e.match_type.toLowerCase()}|${e.pattern.toLowerCase()}`;
+  }
+
+  /** True when a disabled seed entry is inert to `restore_seed` because an
+   *  enabled user entry with the same (kind, match_type, pattern) shadows
+   *  it — `restore_seed` only clears `disabled_seed_ids`, which doesn't
+   *  touch shadowing, so Restore would silently do nothing here. */
+  function isShadowed(entry: MergedEntry): boolean {
+    if (entry.source !== "seed") return false;
+    const key = shadowKey(entry);
+    return entries.some((e) => e.source === "user" && e.enabled && shadowKey(e) === key);
+  }
+
   // A single warning banner at the top covers both sources — libraryList's
   // own warning and the review report's library_warning are the same
   // underlying "library.json couldn't be read" condition.
@@ -166,6 +180,7 @@
   // ---- Collection review ---------------------------------------------------
 
   let reviewRunning = $state(false);
+  let refreshing = $state(false);
   let reviewProgress = $state<FindProgress | null>(null);
   let reviewError = $state<string | null>(null);
   // Plain top-level binding to the store's report, so the template's
@@ -190,12 +205,14 @@
   /** Fast path after a modal save — updates the existing report in place
    *  instead of re-parsing every preset. */
   async function refreshReview() {
+    refreshing = true;
     reviewError = null;
     try {
       libraryReview.report = await reviewRefresh((p) => (reviewProgress = p));
     } catch (e) {
       reviewError = friendly(e);
     } finally {
+      refreshing = false;
       reviewProgress = null;
     }
   }
@@ -329,7 +346,11 @@
               >
                 <Pencil size={13} strokeWidth={1.6} />
               </button>
-              {#if entry.source === "seed" && !entry.enabled}
+              {#if entry.source === "seed" && !entry.enabled && isShadowed(entry)}
+                <span class="kind-chip" title="An enabled entry of yours matches the same pattern — delete or edit that entry to restore this one">
+                  shadowed by your entry
+                </span>
+              {:else if entry.source === "seed" && !entry.enabled}
                 <button
                   type="button"
                   class="icon-btn"
@@ -360,7 +381,7 @@
   <section class="sf-card review-card">
     <div class="review-head">
       <h2 class="sf-label">Collection Review</h2>
-      {#if reviewReport && !reviewRunning}
+      {#if reviewReport && !reviewRunning && !refreshing}
         <button type="button" class="btn btn-ghost btn-sm" onclick={runReview}>
           <RefreshCw size={13} /> Rescan
         </button>
@@ -402,6 +423,16 @@
         </EmptyState>
       {:else}
         {@const report = reviewReport}
+        {#if refreshing}
+          <div class="refresh-block">
+            <p class="refresh-stage">Refreshing…</p>
+            <ProgressBar
+              current={reviewProgress?.current ?? 0}
+              total={reviewProgress?.total ?? 0}
+              label={reviewProgress?.detail ?? ""}
+            />
+          </div>
+        {/if}
         {#if report.nexus_error}
           <div class="note note-warning">{report.nexus_error}</div>
         {/if}
@@ -744,6 +775,15 @@
     margin: 0 0 10px;
     font-size: 13px;
     color: var(--sf-text-2);
+  }
+  .refresh-block {
+    padding: 2px 4px 4px;
+    border-bottom: 1px solid var(--sf-line);
+  }
+  .refresh-stage {
+    margin: 0 0 6px;
+    font-size: 11px;
+    color: var(--sf-text-3);
   }
   .tally-line {
     margin: 0;
