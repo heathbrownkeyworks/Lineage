@@ -152,6 +152,97 @@ pub fn nexus_mod_id_from_url(url: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
+/// Validation shared by every write path. Human-readable errors.
+fn validate(entry: &LibraryEntry) -> Result<(), String> {
+    if entry.name.trim().is_empty() {
+        return Err("Give the mod a name.".into());
+    }
+    let url = entry.url.trim();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("The link must be a full http(s) URL.".into());
+    }
+    if !matches!(entry.kind.as_str(), "plugin" | "texture" | "morph") {
+        return Err("Unknown reference kind.".into());
+    }
+    match entry.match_type.as_str() {
+        "exact" if !entry.pattern.trim().is_empty() => Ok(()),
+        "prefix" if entry.pattern.trim().len() >= 3 => Ok(()),
+        "prefix" => Err("A prefix pattern needs at least 3 characters.".into()),
+        _ => Err("Pattern can't be empty.".into()),
+    }
+}
+
+pub fn upsert_entries(config_dir: &Path, entries: Vec<LibraryEntry>) -> Result<(), String> {
+    let (mut file, _) = load_user_file(config_dir);
+    for mut e in entries {
+        validate(&e)?;
+        if e.id.trim().is_empty() {
+            let millis = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            e.id = format!("user-{millis}-{}", file.entries.len());
+        }
+        // Replace by id, else by shadow key (same kind+match+pattern).
+        file.entries
+            .retain(|x| x.id != e.id && shadow_key(x) != shadow_key(&e));
+        file.entries.push(e);
+    }
+    save_user_file(config_dir, &file)
+}
+
+pub fn delete_entry(config_dir: &Path, id: &str) -> Result<(), String> {
+    let (mut file, _) = load_user_file(config_dir);
+    if id.starts_with("seed-") {
+        if !file.disabled_seed_ids.iter().any(|x| x == id) {
+            file.disabled_seed_ids.push(id.to_string());
+        }
+    } else {
+        file.entries.retain(|x| x.id != id);
+    }
+    save_user_file(config_dir, &file)
+}
+
+pub fn restore_seed(config_dir: &Path, id: &str) -> Result<(), String> {
+    let (mut file, _) = load_user_file(config_dir);
+    file.disabled_seed_ids.retain(|x| x != id);
+    save_user_file(config_dir, &file)
+}
+
+fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    app.path()
+        .app_config_dir()
+        .map_err(|e| format!("failed to resolve app config dir: {e}"))
+}
+
+#[derive(Debug, Serialize)]
+pub struct LibraryListing {
+    pub entries: Vec<MergedEntry>,
+    pub warning: Option<String>,
+}
+
+#[tauri::command]
+pub fn library_list(app: tauri::AppHandle) -> Result<LibraryListing, String> {
+    let lib = load_from_dir(&config_dir(&app)?);
+    Ok(LibraryListing { entries: lib.entries, warning: lib.warning })
+}
+
+#[tauri::command]
+pub fn library_save_entries(app: tauri::AppHandle, entries: Vec<LibraryEntry>) -> Result<(), String> {
+    upsert_entries(&config_dir(&app)?, entries)
+}
+
+#[tauri::command]
+pub fn library_delete_entry(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    delete_entry(&config_dir(&app)?, &id)
+}
+
+#[tauri::command]
+pub fn library_restore_seed(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    restore_seed(&config_dir(&app)?, &id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +260,66 @@ mod tests {
             match_type: match_type.into(), name: format!("{id} name"),
             url: "https://example.com/mod".into(),
         }
+    }
+
+    #[test]
+    fn upsert_replaces_by_id_and_by_shadow_key_and_assigns_ids() {
+        let dir = temp_dir("upsert");
+        // New entry with empty id gets a user- id assigned.
+        let mut e = user_entry("", "plugin", "HG Hairdos 2.esp", "exact");
+        upsert_entries(&dir, vec![e.clone()]).unwrap();
+        let (file, _) = load_user_file(&dir);
+        assert_eq!(file.entries.len(), 1);
+        assert!(file.entries[0].id.starts_with("user-"));
+
+        // Same (kind, match_type, pattern), different id → replaces, no dupe.
+        e.id = String::new();
+        e.name = "Corrected name".into();
+        upsert_entries(&dir, vec![e]).unwrap();
+        let (file, _) = load_user_file(&dir);
+        assert_eq!(file.entries.len(), 1);
+        assert_eq!(file.entries[0].name, "Corrected name");
+
+        // Update by id keeps one entry even when the pattern changes.
+        let mut existing = file.entries[0].clone();
+        existing.pattern = "HG Hairdos".into();
+        existing.match_type = "prefix".into();
+        upsert_entries(&dir, vec![existing]).unwrap();
+        let (file, _) = load_user_file(&dir);
+        assert_eq!(file.entries.len(), 1);
+        assert_eq!(file.entries[0].match_type, "prefix");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upsert_validates_inputs() {
+        let dir = temp_dir("validate");
+        let mut bad = user_entry("", "plugin", "X.esp", "exact");
+        bad.url = "ftp://nope".into();
+        assert!(upsert_entries(&dir, vec![bad]).is_err());
+        let mut bad = user_entry("", "plugin", "ab", "prefix"); // prefix min length 3
+        bad.url = "https://ok.example".into();
+        assert!(upsert_entries(&dir, vec![bad]).is_err());
+        let mut bad = user_entry("", "plugin", "X.esp", "exact");
+        bad.name = "  ".into();
+        assert!(upsert_entries(&dir, vec![bad]).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_removes_user_entry_and_disables_seed() {
+        let dir = temp_dir("delete");
+        upsert_entries(&dir, vec![user_entry("", "plugin", "X.esp", "exact")]).unwrap();
+        let (file, _) = load_user_file(&dir);
+        let id = file.entries[0].id.clone();
+        delete_entry(&dir, &id).unwrap();
+        assert!(load_user_file(&dir).0.entries.is_empty());
+
+        delete_entry(&dir, "seed-expressive-facegen-morphs").unwrap();
+        assert!(load_user_file(&dir).0.disabled_seed_ids.contains(&"seed-expressive-facegen-morphs".to_string()));
+        restore_seed(&dir, "seed-expressive-facegen-morphs").unwrap();
+        assert!(load_user_file(&dir).0.disabled_seed_ids.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

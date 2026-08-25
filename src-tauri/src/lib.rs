@@ -91,6 +91,10 @@ pub fn run() {
             nexus::validate_nexus_key,
             nexus::get_rate_limit,
             assets::find_assets,
+            library::library_list,
+            library::library_save_entries,
+            library::library_delete_entry,
+            library::library_restore_seed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

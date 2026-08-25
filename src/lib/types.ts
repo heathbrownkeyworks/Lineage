@@ -258,3 +258,23 @@ export type FindProgress = {
   total: number;
   detail: string;
 };
+
+/** One Asset Library mapping from a preset reference to a mod name + link. */
+export type LibraryEntry = {
+  id: string;
+  kind: "plugin" | "texture" | "morph";
+  pattern: string;
+  match_type: "exact" | "prefix";
+  name: string;
+  url: string;
+};
+
+export type MergedEntry = LibraryEntry & {
+  source: "seed" | "user";
+  enabled: boolean;
+};
+
+export type LibraryListing = {
+  entries: MergedEntry[];
+  warning: string | null;
+};

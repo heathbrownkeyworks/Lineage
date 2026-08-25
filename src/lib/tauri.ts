@@ -15,7 +15,10 @@ import type {
   FindAssetsReport,
   FindProgress,
   JslotRoot,
+  LibraryEntry,
+  LibraryListing,
   Mo2ProfileOption,
+  MergedEntry,
   NexusValidation,
   PresetInspection,
   RateLimitInfo,
@@ -144,6 +147,24 @@ export async function findAssets(
   const channel = new Channel<FindProgress>();
   if (onProgress) channel.onmessage = onProgress;
   return await invoke<FindAssetsReport>("find_assets", { path, onProgress: channel });
+}
+
+// ---- asset library -------------------------------------------------------
+
+export async function libraryList(): Promise<LibraryListing> {
+  return await invoke<LibraryListing>("library_list");
+}
+
+export async function librarySaveEntries(entries: LibraryEntry[]): Promise<void> {
+  await invoke("library_save_entries", { entries });
+}
+
+export async function libraryDeleteEntry(id: string): Promise<void> {
+  await invoke("library_delete_entry", { id });
+}
+
+export async function libraryRestoreSeed(id: string): Promise<void> {
+  await invoke("library_restore_seed", { id });
 }
 
 // ---- shared display helpers ----------------------------------------------
