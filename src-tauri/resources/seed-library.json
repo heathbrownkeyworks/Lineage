@@ -6,5 +6,301 @@
     "match_type": "prefix",
     "name": "Expressive Facegen Morphs",
     "url": "https://www.nexusmods.com/skyrimspecialedition/mods/35785"
+  },
+  {
+    "id": "seed-ece-morphs",
+    "kind": "morph",
+    "pattern": "ECE_",
+    "match_type": "prefix",
+    "name": "Enhanced Character Edit SE (ECE sliders)",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/12302"
+  },
+  {
+    "id": "seed-cme-morphs",
+    "kind": "morph",
+    "pattern": "CME_",
+    "match_type": "prefix",
+    "name": "Enhanced Character Edit SE (CME sliders)",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/12302"
+  },
+  {
+    "id": "seed-xpmse-morphs",
+    "kind": "morph",
+    "pattern": "XPMSE",
+    "match_type": "prefix",
+    "name": "XP32 Maximum Skeleton Special Extended (XPMSE)",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/1988"
+  },
+  {
+    "id": "seed-high-poly-head",
+    "kind": "plugin",
+    "pattern": "High Poly Head.esm",
+    "match_type": "exact",
+    "name": "High Poly Head",
+    "url": "https://vectorplexus.com/files/file/283-high-poly-head/"
+  },
+  {
+    "id": "seed-ks-hairdos-esp",
+    "kind": "plugin",
+    "pattern": "KS Hairdo's.esp",
+    "match_type": "exact",
+    "name": "KS Hairdos SSE",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/6817"
+  },
+  {
+    "id": "seed-ks-hairdos-prefix",
+    "kind": "plugin",
+    "pattern": "KS Hairdos",
+    "match_type": "prefix",
+    "name": "KS Hairdos SSE",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/6817"
+  },
+  {
+    "id": "seed-eyes-of-beauty",
+    "kind": "plugin",
+    "pattern": "TheEyesOfBeauty.esp",
+    "match_type": "exact",
+    "name": "The Eyes Of Beauty SSE",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/16185"
+  },
+  {
+    "id": "seed-brows-hvergelmir",
+    "kind": "plugin",
+    "pattern": "Brows.esp",
+    "match_type": "exact",
+    "name": "Brows (Hvergelmir)",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/1062"
+  },
+  {
+    "id": "seed-racemenu-esp",
+    "kind": "plugin",
+    "pattern": "RaceMenu.esp",
+    "match_type": "exact",
+    "name": "RaceMenu",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/19080"
+  },
+  {
+    "id": "seed-racemenu-plugin-esp",
+    "kind": "plugin",
+    "pattern": "RaceMenuPlugin.esp",
+    "match_type": "exact",
+    "name": "RaceMenu",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/19080"
+  },
+  {
+    "id": "seed-xpmse-esp",
+    "kind": "plugin",
+    "pattern": "XPMSE.esp",
+    "match_type": "exact",
+    "name": "XP32 Maximum Skeleton Special Extended (XPMSE)",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/1988"
+  },
+  {
+    "id": "seed-kalilies-brows-hph",
+    "kind": "plugin",
+    "pattern": "Kalilies Brows for High Poly Head.esp",
+    "match_type": "exact",
+    "name": "Kalilies Brows for High Poly Head - COTR - UBE",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/57115"
+  },
+  {
+    "id": "seed-hg-hairdos-2",
+    "kind": "plugin",
+    "pattern": "HG Hairdos 2.esp",
+    "match_type": "exact",
+    "name": "HG Hairdos 2 SSE",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/116212"
+  },
+  {
+    "id": "seed-tw3-eyes",
+    "kind": "plugin",
+    "pattern": "TW3Eyes.esp",
+    "match_type": "exact",
+    "name": "The Witcher 3 Eyes (SE)",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/2921"
+  },
+  {
+    "id": "seed-dint999-faceparts",
+    "kind": "plugin",
+    "pattern": "[Dint999] FacePartMod.esp",
+    "match_type": "exact",
+    "name": "Dint999 Face Part Mod",
+    "url": "https://www.patreon.com/posts/face-part-mod-se-87980358"
+  },
+  {
+    "id": "seed-alt1-facial-hair-hph",
+    "kind": "plugin",
+    "pattern": "ALT1 Facial Hair HPH Standalone AIO.esp",
+    "match_type": "exact",
+    "name": "ALT1 Facial Hair (HPH Standalone AIO)",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/search/?gsearch=ALT1+Facial+Hair+High+Poly+Head"
+  },
+  {
+    "id": "seed-kalilies-brows",
+    "kind": "plugin",
+    "pattern": "KaliliesBrows.esp",
+    "match_type": "exact",
+    "name": "Kalilies Brows",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/40595"
+  },
+  {
+    "id": "seed-improved-eyes-skyrim",
+    "kind": "plugin",
+    "pattern": "Improved Eyes Skyrim.esp",
+    "match_type": "exact",
+    "name": "Improved Eyes Skyrim",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/9141"
+  },
+  {
+    "id": "seed-kyoe-banginbrows-underscore",
+    "kind": "plugin",
+    "pattern": "Kyoe_BanginBrows.esp",
+    "match_type": "exact",
+    "name": "Kyoe's Bang'n Brows",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/13630"
+  },
+  {
+    "id": "seed-kyoe-banginbrows-space",
+    "kind": "plugin",
+    "pattern": "Kyoe BanginBrows.esp",
+    "match_type": "exact",
+    "name": "Kyoe's Bang'n Brows",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/13630"
+  },
+  {
+    "id": "seed-maevan2-eyebrows",
+    "kind": "plugin",
+    "pattern": "Maevan2EyeBrows.esp",
+    "match_type": "exact",
+    "name": "Maevan2's Eye Brows SE",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/26881"
+  },
+  {
+    "id": "seed-miggyluv-eyes",
+    "kind": "plugin",
+    "pattern": "Miggyluv's Eyes.esp",
+    "match_type": "exact",
+    "name": "Miggyluv's Eyes",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/155332"
+  },
+  {
+    "id": "seed-tullius-eyes",
+    "kind": "plugin",
+    "pattern": "Tullius Eyes.esp",
+    "match_type": "exact",
+    "name": "Tullius Eyes Pack",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/search/?gsearch=Tullius+Eyes"
+  },
+  {
+    "id": "seed-mikan-eyes-aio",
+    "kind": "plugin",
+    "pattern": "MikanEyes All in one SE.esp",
+    "match_type": "exact",
+    "name": "Mikan Eyes (All in One SE)",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/search/?gsearch=MikanEyes+All+in+one"
+  },
+  {
+    "id": "seed-holiday-gift-hairdos",
+    "kind": "plugin",
+    "pattern": "Holiday Gift Hairdos.esp",
+    "match_type": "exact",
+    "name": "Holiday Gift Hairdos",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/search/?gsearch=Holiday+Gift+Hairdos"
+  },
+  {
+    "id": "seed-sg-eyebrows",
+    "kind": "plugin",
+    "pattern": "SGEyebrows.esp",
+    "match_type": "exact",
+    "name": "SG Female Eyebrows",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/25890"
+  },
+  {
+    "id": "seed-kala-eyes",
+    "kind": "plugin",
+    "pattern": "Kala_Eyes.esp",
+    "match_type": "exact",
+    "name": "Kala's Eyes",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/29895"
+  },
+  {
+    "id": "seed-cveo-by-ldd",
+    "kind": "plugin",
+    "pattern": "CompleteVanillaEyeOverhaul_CVEObyLDD.esp",
+    "match_type": "exact",
+    "name": "Complete Vanilla Eye Overhaul (CVEO) by LDD",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/160705"
+  },
+  {
+    "id": "seed-beards-for-hph",
+    "kind": "plugin",
+    "pattern": "Beards for High Poly Head.esp",
+    "match_type": "exact",
+    "name": "Beards for High Poly Head",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/46990"
+  },
+  {
+    "id": "seed-overlay-fms",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\Overlays\\FMS\\",
+    "match_type": "prefix",
+    "name": "Female Makeup Suite",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/24495"
+  },
+  {
+    "id": "seed-overlay-pockypunk",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\Overlays\\PockyPunk\\",
+    "match_type": "prefix",
+    "name": "Pocky's 4k Human Female Makeup",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/44716"
+  },
+  {
+    "id": "seed-overlay-koralina",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\Overlays\\Koralina\\",
+    "match_type": "prefix",
+    "name": "Koralina's Makeup Tweaks",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/63024"
+  },
+  {
+    "id": "seed-overlay-sdz21-lovely-makeup",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\Overlays\\(SDZ21) Lovely Makeup\\",
+    "match_type": "prefix",
+    "name": "(SDZ21) Lovely Makeup",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/search/?gsearch=SDZ21+Lovely+Makeup"
+  },
+  {
+    "id": "seed-overlay-kml",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\Overlays\\KML\\",
+    "match_type": "prefix",
+    "name": "KML Makeup Suite",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/56927"
+  },
+  {
+    "id": "seed-overlay-wolfpaint",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\Overlays\\Wolfpaint\\",
+    "match_type": "prefix",
+    "name": "Wolfpaint - Face",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/30255"
+  },
+  {
+    "id": "seed-overlay-lamenthia",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\Overlays\\Lamenthia\\",
+    "match_type": "prefix",
+    "name": "Lamenthia's Marks of Beauty",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/49845"
+  },
+  {
+    "id": "seed-overlay-sfo",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\Overlays\\SFO\\",
+    "match_type": "prefix",
+    "name": "Skin Feature Overlays SE",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/20183"
   }
 ]

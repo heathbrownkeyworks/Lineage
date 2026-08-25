@@ -179,3 +179,43 @@ normalized. This is the only unavoidable reformatting case found.
 - **Morph names** never resolve to files; they're always listed under Unknown
   with a best-guess origin hint for recognizable prefixes (`EFM_`,
   `ECE_`/`CME_`, `XPMSE*`).
+
+## Asset Library
+
+- **Layered storage.** A seed list compiled into the binary via
+  `include_str!` ([library.rs](src-tauri/src/library.rs),
+  `src-tauri/resources/seed-library.json`) plus a user-editable
+  `library.json` in the app config dir
+  (`%APPDATA%\com.coldsun.lineage\library.json`). `library::load_from_dir`
+  parses and merges both at report time; the seed file itself is never
+  written to at runtime, only read.
+- **Precedence rule: user > automatic > seed.** A manual library entry
+  (kind, match_type, pattern — the "shadow key") always wins over a seed
+  entry covering the same pattern; the shadowed seed entry is marked
+  `enabled: false` rather than deleted, so restoring it later needs no data
+  recovery. A seed entry can also be disabled outright without a
+  replacement (`disabled_seed_ids`). Among entries that remain enabled,
+  `Library::match_entry` ranks by specificity first — exact beats prefix,
+  a longer prefix beats a shorter one — and only falls back to
+  user-over-seed as the final tiebreak at equal specificity. "Automatic"
+  here means the existing Nexus MD5/mod-id resolution path in
+  [assets.rs](src-tauri/src/assets.rs); the library only fills in what that
+  path leaves unresolved, and a user library entry can still override an
+  automatic Nexus match for the same reference.
+- **`page_url` rename.** `IdentifiedGroup.nexus_url` (the original,
+  Nexus-only field name) became `page_url` once library entries could
+  resolve to non-Nexus links — the seed's High Poly Head entry, for
+  example, points at vectorplexus.com. The Find Assets page's link button
+  now reads "Open on Nexus" only when `page_url` contains
+  `nexusmods.com`, and "Open page" otherwise.
+- **Seed promotion pipeline.** The seed list ships as a curated best-effort
+  draft, not a finished catalog. After
+  Heath reviews and corrects entries in-app (Collection Review → Asset
+  Library screen), his `library.json` corrections are meant to be folded
+  back into `seed-library.json` ahead of a release: `user-*` ids
+  re-slugged to `seed-<slug>`, duplicates against existing seed patterns
+  resolved by keeping his correction, then the seed validation test
+  (`library::tests::seed_file_is_valid_and_unique` — checks id/shadow-key
+  uniqueness and runs every entry through the same `validate()` the UI
+  uses) rerun before the next build. This keeps corrections that would
+  otherwise live only on his machine available to every install.

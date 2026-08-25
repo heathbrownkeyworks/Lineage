@@ -363,23 +363,26 @@ mod tests {
     fn matching_specificity_exact_then_longer_prefix_then_user() {
         let dir = temp_dir("specificity");
         let file = UserLibraryFile {
+            // "Zzq" namespace deliberately avoids overlapping any real seed
+            // pattern (e.g. seed-ks-hairdos-prefix's "KS Hairdos"), so this
+            // test's specificity assertions stay isolated from seed content.
             entries: vec![
-                user_entry("user-exact", "plugin", "KS Hairdo's.esp", "exact"),
-                user_entry("user-short", "plugin", "KS", "prefix"),
-                user_entry("user-long", "plugin", "KS Hairdo", "prefix"),
+                user_entry("user-exact", "plugin", "Zzq Hairdo's.esp", "exact"),
+                user_entry("user-short", "plugin", "Zz", "prefix"),
+                user_entry("user-long", "plugin", "Zzq Hairdo", "prefix"),
             ],
             disabled_seed_ids: vec![],
         };
         save_user_file(&dir, &file).unwrap();
         let lib = load_from_dir(&dir);
         // Exact beats prefix, case-insensitively.
-        let hit = lib.match_entry("plugin", "ks hairdo's.esp", false).unwrap();
+        let hit = lib.match_entry("plugin", "zzq hairdo's.esp", false).unwrap();
         assert_eq!(hit.entry.id, "user-exact");
         // Longer prefix beats shorter.
-        let hit = lib.match_entry("plugin", "KS Hairdos Lite.esp", false).unwrap();
+        let hit = lib.match_entry("plugin", "Zzq Hairdos Lite.esp", false).unwrap();
         assert_eq!(hit.entry.id, "user-long");
         // Kind is scoped.
-        assert!(lib.match_entry("texture", "KS Hairdo's.esp", false).is_none());
+        assert!(lib.match_entry("texture", "Zzq Hairdo's.esp", false).is_none());
         // user_only skips seed entries.
         assert!(lib.match_entry("morph", "EFM_Brow_Width", true).is_none());
         assert!(lib.match_entry("morph", "EFM_Brow_Width", false).is_some());
@@ -396,6 +399,20 @@ mod tests {
         // The corrupt file was not overwritten.
         assert_eq!(std::fs::read(user_file_path(&dir)).unwrap(), b"{ not json");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seed_file_is_valid_and_unique() {
+        let seed: Vec<LibraryEntry> = serde_json::from_str(SEED_JSON).unwrap();
+        let mut ids = std::collections::HashSet::new();
+        let mut keys = std::collections::HashSet::new();
+        for e in &seed {
+            assert!(e.id.starts_with("seed-"), "{}", e.id);
+            assert!(ids.insert(e.id.clone()), "duplicate id {}", e.id);
+            assert!(keys.insert(shadow_key(e)), "duplicate pattern {}", e.pattern);
+            assert!(validate(e).is_ok(), "invalid seed entry {}: {:?}", e.id, validate(e));
+        }
+        assert!(seed.len() >= 30, "seed list looks incomplete: {}", seed.len());
     }
 
     #[test]

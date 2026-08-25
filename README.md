@@ -11,6 +11,11 @@ A RaceMenu `.jslot` preset utility by **ColdSun Creative**.
   their JSLOTs, so a preset applies the face without overwriting your body.
 - **Batch Remove** — the same cleanup across your whole collection, with
   per-file selection, automatic pre-change snapshots, and one-click restore.
+- **Asset Library** — an editable list of preset-reference-to-mod mappings
+  (plugins, textures, morph name prefixes) that Find Assets and Collection
+  Review fall back on when Nexus can't resolve a reference. Ships with a
+  curated seed list; every correction or addition you make is saved to your
+  own `library.json` and takes precedence over the built-in entries.
 
 Lineage never writes anything into your mod folders except the modified
 preset itself — no `.bak` files, no stray temp files. Every destructive
@@ -67,6 +72,7 @@ appears in error messages or the UI once saved.
 | Thing | Location |
 |---|---|
 | Settings | `%APPDATA%\com.coldsun.lineage\settings.json` |
+| Asset Library (your entries) | `%APPDATA%\com.coldsun.lineage\library.json` |
 | Nexus response cache | `%APPDATA%\com.coldsun.lineage\cache\nexus\` |
 | Full backups | your configured backup folder (default `Documents\Lineage\Backups`) |
 | Operation snapshots | `<backup folder>\Snapshots\` |
