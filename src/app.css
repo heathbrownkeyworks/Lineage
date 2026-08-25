@@ -1,0 +1,315 @@
+@import "@fontsource/geomini/400.css";
+@import "@fontsource/geomini/500.css";
+@import "@fontsource/geomini/600.css";
+@import "@fontsource/geomini/700.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+/* Starfall design tokens — vendored from the Starfall Design System
+   (E:\Downloads\Starfall design system). Author UI against these. */
+@import "./lib/starfall/tokens.css";
+
+@import "tailwindcss";
+
+/* Tailwind v4 theme mapping, exactly as starfall-tailwind.md prescribes. */
+@theme {
+  --color-void: var(--sf-void);
+  --color-bg: var(--sf-bg);
+  --color-surface: var(--sf-surface);
+  --color-raised: var(--sf-raised);
+  --color-overlay: var(--sf-overlay);
+
+  --color-primary: var(--sf-primary);
+  --color-secondary: var(--sf-secondary);
+  --color-tertiary: var(--sf-tertiary);
+  --color-success: var(--sf-success);
+  --color-warning: var(--sf-warning);
+  --color-danger: var(--sf-danger);
+
+  --color-ink: var(--sf-text);
+  --color-ink-2: var(--sf-text-2);
+  --color-ink-3: var(--sf-text-3);
+  --color-line: var(--sf-line);
+
+  --radius-sf-sm: var(--sf-r-sm);
+  --radius-sf: var(--sf-r-md);
+  --radius-sf-lg: var(--sf-r-lg);
+  --radius-sf-xl: var(--sf-r-xl);
+
+  --shadow-e1: var(--sf-e1);
+  --shadow-e2: var(--sf-e2);
+  --shadow-e3: var(--sf-e3);
+  --shadow-glow: var(--sf-glow);
+
+  --font-display: var(--sf-font-display);
+  --font-body: var(--sf-font-body);
+  --font-mono: var(--sf-font-mono);
+
+  --ease-sf: var(--sf-ease);
+  --ease-spring: var(--sf-spring);
+}
+
+/*
+ * Lineage — Starfall theme. Dark-only: violet (Nebula) drives actions, cyan
+ * (Ion) is for data and live values, rose (Flare) is reserved. Elevation by
+ * lightness first, compact pro density throughout.
+ */
+:root {
+  color-scheme: dark;
+  accent-color: var(--sf-primary);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--sf-line);
+  }
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    margin: 0;
+    /* --sf-void behind the window so rounded corners read cleanly (Starfall
+       Tauri rule); the shell paints --sf-bg for the content canvas. */
+    background: var(--sf-void);
+    color: var(--sf-text);
+    font-family: var(--sf-font-body);
+    font-size: 13px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color-scheme: dark;
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--sf-font-mono);
+  }
+  ::selection {
+    background: var(--sf-selected);
+  }
+  /* Keyboard focus must be visible on every interactive element. */
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--sf-focus);
+    border-radius: var(--sf-r-sm);
+  }
+}
+
+/* ===== Scrollbar: quiet, elevation-neutral ===== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sf-border) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--sf-border);
+  border-radius: var(--sf-r-full);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sf-border-strong);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ===== Starfall recipes shared across the app ===== */
+
+@layer utilities {
+  /* Tracked uppercase label — the system's most-used small text. */
+  .sf-label {
+    font-family: var(--sf-font-body);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--sf-text-3);
+  }
+  .sf-micro {
+    font-family: var(--sf-font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--sf-text-off);
+  }
+
+  /* Display heading: Geomini. */
+  .sf-display {
+    font-family: var(--sf-font-display);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  /* Panel card: surface above the bg canvas, elevation by lightness first. */
+  .sf-card {
+    background: var(--sf-surface);
+    border: 1px solid var(--sf-line);
+    border-radius: var(--sf-r-lg);
+    box-shadow: var(--sf-e1);
+  }
+  /* Sunken well: inner fills go DOWN (inset over surface). */
+  .sf-well {
+    background: var(--sf-inset);
+    border: 1px solid var(--sf-line);
+    border-radius: var(--sf-r-md);
+  }
+
+  /* Buttons — compact density (32px default control height). */
+  .btn {
+    height: var(--sf-h-md);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 var(--sf-4);
+    border-radius: var(--sf-r-md);
+    font-weight: 500;
+    font-size: 13px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition:
+      background var(--sf-dur-fast) var(--sf-ease),
+      border-color var(--sf-dur-fast) var(--sf-ease),
+      color var(--sf-dur-fast) var(--sf-ease),
+      transform var(--sf-dur-fast) var(--sf-spring),
+      box-shadow var(--sf-dur-fast) var(--sf-ease);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  /* Primary: violet gradient + glow — glow marks the action that matters. */
+  .btn-primary {
+    color: var(--sf-text);
+    background: linear-gradient(to bottom, var(--sf-primary), var(--sf-primary-700));
+    box-shadow: var(--sf-glow);
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0) scale(0.98);
+  }
+  .btn-ghost {
+    color: var(--sf-text-2);
+    background: transparent;
+    border-color: var(--sf-border);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--sf-hover);
+    color: var(--sf-text);
+    border-color: var(--sf-border-strong);
+  }
+  .btn-danger {
+    color: var(--sf-danger);
+    background: var(--sf-danger-soft);
+    border-color: transparent;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: rgba(255, 107, 107, 0.22);
+  }
+  .btn-sm {
+    height: var(--sf-h-sm);
+    padding: 0 var(--sf-3);
+    font-size: 12px;
+  }
+
+  /* Text input. */
+  .input {
+    height: var(--sf-h-md);
+    width: 100%;
+    border-radius: var(--sf-r-md);
+    border: 1px solid var(--sf-border);
+    background: var(--sf-inset);
+    padding: 0 var(--sf-3);
+    font-size: 13px;
+    color: var(--sf-text);
+    transition:
+      border-color var(--sf-dur-fast) var(--sf-ease),
+      box-shadow var(--sf-dur-fast) var(--sf-ease);
+  }
+  .input::placeholder {
+    color: var(--sf-text-off);
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--sf-primary);
+    box-shadow: 0 0 0 4px var(--sf-primary-soft);
+  }
+  .input-mono {
+    font-family: var(--sf-font-mono);
+    font-size: 12px;
+  }
+
+  /* Status notes. */
+  .note {
+    border-radius: var(--sf-r-md);
+    padding: var(--sf-3) var(--sf-4);
+    font-size: 12.5px;
+    line-height: 1.5;
+    border: 1px solid transparent;
+  }
+  .note-warning {
+    background: var(--sf-warning-soft);
+    border-color: rgba(245, 185, 92, 0.3);
+    color: var(--sf-warning);
+  }
+  .note-danger {
+    background: var(--sf-danger-soft);
+    border-color: rgba(255, 107, 107, 0.3);
+    color: var(--sf-danger);
+  }
+  .note-success {
+    background: var(--sf-success-soft);
+    border-color: rgba(74, 222, 158, 0.3);
+    color: var(--sf-success);
+  }
+  .note-info {
+    background: var(--sf-secondary-soft);
+    border-color: rgba(69, 215, 239, 0.3);
+    color: var(--sf-secondary);
+  }
+
+  /* Entrance. */
+  .fx-rise {
+    animation: sf-rise var(--sf-dur-slow) var(--sf-spring) both;
+  }
+  .fx-stagger > * {
+    animation: sf-rise var(--sf-dur-slow) var(--sf-spring) both;
+    animation-delay: calc(var(--i, 0) * 40ms);
+  }
+}
+
+/* ===== Reduced motion: settle everything at its rest state ===== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

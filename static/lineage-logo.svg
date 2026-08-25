@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="lg-violet" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#CFC9FF"/>
+      <stop offset="0.55" stop-color="#8B7DFF"/>
+      <stop offset="1" stop-color="#6152D6"/>
+    </linearGradient>
+  </defs>
+  <!-- Lineage mark: a descent tree — one ancestor node branching to two. -->
+  <path d="M32 18 V32 M32 32 L18 42 M32 32 L46 42" stroke="url(#lg-violet)" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="32" cy="13" r="7" fill="url(#lg-violet)"/>
+  <circle cx="15" cy="48" r="6" fill="none" stroke="url(#lg-violet)" stroke-width="4"/>
+  <circle cx="49" cy="48" r="6" fill="none" stroke="#45D7EF" stroke-width="4"/>
+</svg>

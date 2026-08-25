@@ -1,0 +1,83 @@
+# Lineage
+
+A RaceMenu `.jslot` preset utility by **ColdSun Creative**.
+
+- **Find Assets** — pick a preset and trace every plugin, texture, and morph
+  it references back to the mod it came from, with Nexus Mods matches, so you
+  know exactly what to download to make a preset work.
+- **Backup** — one action that archives every JSLOT file across your setup
+  into a dated zip, folder structure preserved.
+- **Remove BodySlide** — strip the body morph data preset authors leave in
+  their JSLOTs, so a preset applies the face without overwriting your body.
+- **Batch Remove** — the same cleanup across your whole collection, with
+  per-file selection, automatic pre-change snapshots, and one-click restore.
+
+Lineage never writes anything into your mod folders except the modified
+preset itself — no `.bak` files, no stray temp files. Every destructive
+operation snapshots the exact files it touches into your backup folder first
+and can be undone from **History** (Settings → History).
+
+## Requirements
+
+- Windows 10/11
+- [Rust](https://rustup.rs/) (stable) and the MSVC build tools
+- [Node.js](https://nodejs.org/) 20+ and [pnpm](https://pnpm.io/)
+- WebView2 runtime (preinstalled on Windows 11)
+
+## Development
+
+```bash
+pnpm install
+pnpm tauri dev
+```
+
+## Build
+
+```bash
+pnpm tauri build
+```
+
+The installer lands in `src-tauri/target/release/bundle/`.
+
+Backend tests (including a byte-perfect round-trip check against real preset
+files, skipped on machines without the corpus):
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+## Nexus Mods API key
+
+Find Assets can identify mods via the Nexus Mods API. It needs your
+**personal API key** from
+[nexusmods.com/settings/api-keys](https://www.nexusmods.com/settings/api-keys)
+(Site Preferences → API Keys). Paste it in **Settings → Nexus Mods API key**
+and hit Validate.
+
+Without a key, Find Assets still parses presets and lists every referenced
+asset and plugin — it just can't match them to Nexus mod pages. Responses are
+cached on disk so repeated scans don't burn your daily rate limit; the
+remaining quota is shown after each scan.
+
+The key is stored in Lineage's local config file, is never logged, and never
+appears in error messages or the UI once saved.
+
+## Where things live
+
+| Thing | Location |
+|---|---|
+| Settings | `%APPDATA%\com.coldsun.lineage\settings.json` |
+| Nexus response cache | `%APPDATA%\com.coldsun.lineage\cache\nexus\` |
+| Full backups | your configured backup folder (default `Documents\Lineage\Backups`) |
+| Operation snapshots | `<backup folder>\Snapshots\` |
+
+Full backups are never deleted by Lineage. Snapshots are pruned automatically
+past the configured retention (default 10).
+
+## Design & structure
+
+UI is built on the **Starfall Design System** (vendored tokens at
+`src/lib/starfall/tokens.css`); the application shell follows **Visage**'s
+structure. See [NOTES.md](NOTES.md) for what was reused and every format
+confirmed against real data (JSLOT dialects, MO2/Vortex metadata, Nexus
+endpoints).

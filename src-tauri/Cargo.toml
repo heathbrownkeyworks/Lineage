@@ -1,0 +1,38 @@
+[package]
+name = "lineage"
+version = "0.1.0"
+description = "Lineage - RaceMenu JSLOT preset utility"
+authors = ["ColdSun Creative"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "lineage_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2.7.2"
+serde = { version = "1", features = ["derive"] }
+# preserve_order + arbitrary_precision: unknown JSLOT keys keep their order and
+# numbers keep their exact source text across a parse/serialize round trip.
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+walkdir = "2.5.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+md-5 = "0.11.0"
+chrono = "0.4.45"
+thiserror = "2.0.20"
+winreg = "0.56.0"
+# rustls-no-provider + explicit ring: reqwest's default rustls provider
+# (aws-lc-rs) needs NASM to build on Windows MSVC; ring does not. The ring
+# provider is installed as process default in run().
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider", "json", "blocking"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

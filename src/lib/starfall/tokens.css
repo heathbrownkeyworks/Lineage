@@ -1,0 +1,122 @@
+/* ============================================================
+   STARFALL — dark-only design tokens
+   Fonts: Geomini (display) / IBM Plex Sans (body) / JetBrains Mono (data)
+   ============================================================ */
+:root {
+  /* ---- surfaces ---- */
+  --sf-void: #07070E;
+  --sf-bg: #0B0B14;
+  --sf-surface: #12121D;
+  --sf-raised: #191926;
+  --sf-overlay: #21212F;
+  --sf-inset: #05050A;
+  --sf-scrim: rgba(4,4,10,0.72);
+
+  /* ---- accents ---- */
+  --sf-primary-50: #EFEDFF;
+  --sf-primary-200: #CFC9FF;
+  --sf-primary-400: #A79CFF;
+  --sf-primary: #8B7DFF;        /* oklch(0.68 0.17 292) */
+  --sf-primary-700: #6152D6;
+  --sf-primary-900: #332A80;
+  --sf-primary-soft: rgba(139,125,255,0.16);
+
+  --sf-secondary-50: #E6FBFF;
+  --sf-secondary-200: #B8F1FB;
+  --sf-secondary-400: #7BE4F5;
+  --sf-secondary: #45D7EF;      /* oklch(0.82 0.12 205) */
+  --sf-secondary-700: #1B9BB5;
+  --sf-secondary-900: #0D4E5C;
+  --sf-secondary-soft: rgba(69,215,239,0.14);
+
+  --sf-tertiary-50: #FFEBF5;
+  --sf-tertiary-200: #FFCCE4;
+  --sf-tertiary-400: #FFA0CE;
+  --sf-tertiary: #FF6FB5;       /* oklch(0.75 0.18 350) */
+  --sf-tertiary-700: #D13B87;
+  --sf-tertiary-900: #6E1B45;
+  --sf-tertiary-soft: rgba(255,111,181,0.14);
+
+  /* ---- semantic ---- */
+  --sf-success: #4ADE9E;
+  --sf-warning: #F5B95C;
+  --sf-danger: #FF6B6B;
+  --sf-info: #45D7EF;
+  --sf-success-soft: rgba(74,222,158,0.14);
+  --sf-warning-soft: rgba(245,185,92,0.14);
+  --sf-danger-soft: rgba(255,107,107,0.14);
+
+  /* ---- text ---- */
+  --sf-text: #F2F2F7;
+  --sf-text-2: #A5A5B8;
+  --sf-text-3: #7C7C93;
+  --sf-text-off: #565669;
+  --sf-text-on-accent: #0B0B14;
+
+  /* ---- lines ---- */
+  --sf-line: rgba(255,255,255,0.07);
+  --sf-border: #2A2A3A;
+  --sf-border-strong: #3E3E58;
+
+  /* ---- state layers ---- */
+  --sf-hover: rgba(255,255,255,0.05);
+  --sf-active: rgba(255,255,255,0.09);
+  --sf-selected: rgba(139,125,255,0.16);
+
+  /* ---- radius ---- */
+  --sf-r-sm: 6px;
+  --sf-r-md: 8px;
+  --sf-r-lg: 12px;
+  --sf-r-xl: 16px;
+  --sf-r-full: 999px;
+
+  /* ---- space (4px base, compact) ---- */
+  --sf-1: 4px;  --sf-2: 8px;  --sf-3: 12px; --sf-4: 16px;
+  --sf-5: 24px; --sf-6: 32px; --sf-7: 48px; --sf-8: 64px;
+
+  /* ---- control heights (pro density) ---- */
+  --sf-h-xs: 24px; --sf-h-sm: 28px; --sf-h-md: 32px; --sf-h-lg: 40px;
+  --sf-titlebar: 36px;
+  --sf-row: 34px;
+
+  /* ---- elevation ---- */
+  --sf-e1: 0 1px 2px rgba(0,0,0,0.5);
+  --sf-e2: 0 8px 24px rgba(0,0,0,0.55);
+  --sf-e3: 0 24px 60px rgba(0,0,0,0.7);
+  --sf-glow: 0 0 28px rgba(139,125,255,0.4);
+  --sf-glow-secondary: 0 0 28px rgba(69,215,239,0.35);
+
+  /* ---- focus ---- */
+  --sf-focus: 0 0 0 2px var(--sf-primary), 0 0 0 6px rgba(139,125,255,0.16);
+
+  /* ---- motion ---- */
+  --sf-ease: cubic-bezier(0.32,0.72,0,1);
+  --sf-spring: cubic-bezier(0.34,1.56,0.64,1);
+  --sf-exit: cubic-bezier(0.4,0,1,1);
+  --sf-drift: cubic-bezier(0.45,0,0.55,1);
+  --sf-dur-instant: 90ms;
+  --sf-dur-fast: 140ms;
+  --sf-dur-base: 180ms;
+  --sf-dur-slow: 340ms;
+  --sf-dur-ambient: 1200ms;
+
+  /* ---- type ---- */
+  --sf-font-display: 'Geomini', system-ui, sans-serif;
+  --sf-font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --sf-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --sf-dur-instant: 1ms; --sf-dur-fast: 1ms; --sf-dur-base: 1ms; --sf-dur-slow: 1ms; }
+  .sf-ambient, .sf-starfield, .sf-shimmer { animation: none !important; }
+}
+
+/* ---- shared keyframes ---- */
+@keyframes sf-drift    { from { transform: translate3d(0,0,0); } to { transform: translate3d(-60px,-40px,0); } }
+@keyframes sf-fall     { 0% { transform: translate3d(0,-10vh,0) rotate(35deg); opacity:0; } 12% { opacity:1; } 100% { transform: translate3d(-30vw,110vh,0) rotate(35deg); opacity:0; } }
+@keyframes sf-pulse    { 0%,100% { opacity:0.55; } 50% { opacity:1; } }
+@keyframes sf-shimmer  { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+@keyframes sf-rise     { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform:none; } }
+@keyframes sf-sweep    { from { transform: translateX(-120%); } to { transform: translateX(120%); } }
+@keyframes sf-spin     { to { transform: rotate(360deg); } }
+@keyframes sf-ripple   { from { transform: scale(0.4); opacity:0.5; } to { transform: scale(2.4); opacity:0; } }
