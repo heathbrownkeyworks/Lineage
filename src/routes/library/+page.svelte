@@ -371,7 +371,13 @@
       {#if reviewRunning}
         <div class="stage-block">
           <p class="stage">
-            {reviewProgress?.stage === "resolving" ? "Resolving references…" : "Parsing presets…"}
+            {#if reviewProgress?.stage === "nexus"}
+              Checking Nexus Mods…
+            {:else if reviewProgress?.stage === "resolving"}
+              Resolving references…
+            {:else}
+              Parsing presets…
+            {/if}
           </p>
           <ProgressBar
             current={reviewProgress?.current ?? 0}
