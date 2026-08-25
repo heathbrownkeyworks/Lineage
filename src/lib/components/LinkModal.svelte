@@ -13,6 +13,15 @@
     /** Prefill for editing an existing attribution/entry. */
     initialName?: string;
     initialUrl?: string;
+    /** Scratch-mode-only prefill (Asset Library editing an existing entry):
+     *  the entry's kind/pattern/match type, so editing doesn't start blank. */
+    initialKind?: Kind;
+    initialPattern?: string;
+    initialMatchType?: "exact" | "prefix";
+    /** Scratch-mode-only: when set, saving updates this entry by id instead
+     *  of creating a new one (the backend upserts by id). Leave unset when
+     *  editing a seed entry — that should create the shadowing user copy. */
+    entryId?: string;
     /** All references in the current report, for the live match count. */
     contextRefs?: Ref[];
     /** Called after a successful save. */
@@ -23,6 +32,10 @@
     references,
     initialName,
     initialUrl,
+    initialKind,
+    initialPattern,
+    initialMatchType,
+    entryId,
     contextRefs,
     onsaved,
   }: Props = $props();
@@ -51,9 +64,17 @@
       saving = false;
       name = initialName ?? "";
       url = initialUrl ?? "";
-      scope = "exact";
-      selectedKind = (references[0]?.kind as Kind | undefined) ?? "plugin";
-      pattern = references[0]?.value ?? "";
+      if (references.length === 0) {
+        // Scratch mode — either "Add entry" (no initial* props) or editing
+        // an existing library entry (initial* props prefill it).
+        scope = initialMatchType ?? "exact";
+        selectedKind = initialKind ?? "plugin";
+        pattern = initialPattern ?? "";
+      } else {
+        scope = "exact";
+        selectedKind = (references[0]?.kind as Kind | undefined) ?? "plugin";
+        pattern = references[0]?.value ?? "";
+      }
       checked = new Set(references.map(refKey));
       if (!dialog.open) dialog.showModal();
     } else if (dialog.open) {
@@ -104,7 +125,7 @@
       const kind = (references.length > 0 ? references[0].kind : selectedKind) as Kind;
       return [
         {
-          id: "",
+          id: references.length === 0 ? (entryId ?? "") : "",
           kind,
           pattern: pattern.trim(),
           match_type: "prefix",
@@ -126,7 +147,7 @@
     }
     return [
       {
-        id: "",
+        id: entryId ?? "",
         kind: selectedKind,
         pattern: pattern.trim(),
         match_type: "exact",

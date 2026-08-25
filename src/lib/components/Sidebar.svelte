@@ -2,13 +2,14 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { Search, Archive, Eraser, Layers } from "lucide-svelte";
+  import { Search, Archive, Eraser, Layers, BookMarked } from "lucide-svelte";
 
   const items = [
     { href: "/find", label: "Find Assets", Icon: Search },
     { href: "/backup", label: "Backup", Icon: Archive },
     { href: "/remove", label: "Remove BodySlide", Icon: Eraser },
     { href: "/batch", label: "Batch Remove", Icon: Layers },
+    { href: "/library", label: "Asset Library", Icon: BookMarked },
   ];
 
   let version = $state("");
