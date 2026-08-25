@@ -1011,6 +1011,8 @@ mod tests {
                 mk("seed-hair", "seed", "plugin", "Hair.esp", "exact", "Wrong Seed Name"),
                 // Seed that attaches a link to a URL-less local-folder group.
                 mk("seed-other", "seed", "plugin", "Other.esp", "exact", "Other Mod"),
+                // Seed that claims a plugin only after heuristics fail to place it.
+                mk("seed-only-plugin", "seed", "plugin", "SeedOnly.esp", "exact", "Seed Only Mod"),
             ],
             warning: None,
         };
@@ -1019,7 +1021,12 @@ mod tests {
         let refs = |kind: &str, value: &str| AssetRef {
             kind: kind.into(), value: value.into(), appeared_in: vec!["test".into()],
         };
-        let plugins = vec![refs("plugin", "Hair.esp"), refs("plugin", "Other.esp"), refs("plugin", "Missing.esp")];
+        let plugins = vec![
+            refs("plugin", "Hair.esp"),
+            refs("plugin", "Other.esp"),
+            refs("plugin", "Missing.esp"),
+            refs("plugin", "SeedOnly.esp"),
+        ];
         let morphs = vec![refs("morph", "EFM_Brow_Width"), refs("morph", "Totally_Custom")];
 
         // No API key: app handle unused on the no-network path — pass via the
@@ -1048,6 +1055,97 @@ mod tests {
 
         // 4. A plugin nothing matches stays unknown.
         assert!(out.unknown.iter().any(|a| a.value == "Missing.esp"));
+
+        // 5. A plugin found nowhere and unmatched by heuristics is still
+        //    claimed by a seed entry (the positive post-heuristics case).
+        let seed_only = out.identified.iter().find(|g| g.name.as_deref() == Some("Seed Only Mod")).unwrap();
+        assert_eq!(seed_only.resolved_by, "library");
+        assert_eq!(seed_only.library_source.as_deref(), Some("seed"));
+        assert!(out.unknown.iter().all(|a| a.value != "SeedOnly.esp"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn library_precedence_texture_kind_covers_all_legs() {
+        use crate::library::{Library, LibraryEntry, MergedEntry};
+        use crate::settings::AppSettings;
+
+        let dir = std::env::temp_dir().join(format!("lineage-resolve-lib-tex-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A mod folder providing one texture → automatic local-folder attribution
+        // would claim it if the user override didn't intercept first.
+        let mods = dir.join("mods");
+        std::fs::create_dir_all(mods.join("Tex Mod").join("textures").join("hair")).unwrap();
+        std::fs::write(
+            mods.join("Tex Mod").join("textures").join("hair").join("uservalue.dds"),
+            b"x",
+        )
+        .unwrap();
+
+        let settings = AppSettings {
+            mod_manager: crate::settings::ModManagerKind::Mo2,
+            mo2_mods_folder: mods.display().to_string(),
+            ..Default::default()
+        };
+        let ctx = build_context(&settings);
+
+        let mk = |id: &str, source: &str, kind: &str, pattern: &str, match_type: &str, name: &str| MergedEntry {
+            entry: LibraryEntry {
+                id: id.into(), kind: kind.into(), pattern: pattern.into(),
+                match_type: match_type.into(), name: name.into(),
+                url: format!("https://example.com/{id}"),
+            },
+            source: source.into(),
+            enabled: true,
+        };
+        let library = Library {
+            entries: vec![
+                // (a) User entry for a texture that ALSO exists on disk under a
+                // tracked mod folder — must resolve via the library before
+                // find_texture attribution ever runs.
+                mk("user-tex", "user", "texture", "hair\\uservalue.dds", "exact", "User Texture Mod"),
+                // (b) Seed entry matching a vanilla-shaped path — the vanilla
+                // exemption gate must win; this entry must never claim it.
+                mk("seed-vanilla-tex", "seed", "texture", "Actors\\Character\\FooBar.dds", "exact", "Should Not Claim Vanilla"),
+                // (c) Seed entry for a non-vanilla texture resolved nowhere else.
+                mk("seed-tex", "seed", "texture", "custom\\seedtex.dds", "exact", "Seed Texture Mod"),
+            ],
+            warning: None,
+        };
+
+        let refs = |kind: &str, value: &str| AssetRef {
+            kind: kind.into(), value: value.into(), appeared_in: vec!["test".into()],
+        };
+        let textures = vec![
+            refs("texture", "hair\\uservalue.dds"),
+            refs("texture", "Actors\\Character\\FooBar.dds"),
+            refs("texture", "custom\\seedtex.dds"),
+        ];
+
+        let out = resolve_refs_offline(&settings, &ctx, &library, &[], &textures, &[]);
+
+        // (a) User override wins over the on-disk local-folder attribution.
+        let user_tex = out
+            .identified
+            .iter()
+            .find(|g| g.assets.iter().any(|a| a.value == "hair\\uservalue.dds"))
+            .unwrap();
+        assert_eq!(user_tex.resolved_by, "library");
+        assert_eq!(user_tex.name.as_deref(), Some("User Texture Mod"));
+        assert_eq!(user_tex.library_source.as_deref(), Some("user"));
+
+        // (b) Vanilla-shaped path classifies as vanilla, not as a library hit,
+        // even though a seed entry matches its exact pattern.
+        assert!(out.extra_vanilla.iter().any(|v| v.eq_ignore_ascii_case("Actors\\Character\\FooBar.dds")));
+        assert!(out.identified.iter().all(|g| g.name.as_deref() != Some("Should Not Claim Vanilla")));
+        assert!(out.unknown.iter().all(|a| a.value != "Actors\\Character\\FooBar.dds"));
+
+        // (c) Non-vanilla texture resolved nowhere else is claimed by the seed entry.
+        let seed_tex = out.identified.iter().find(|g| g.name.as_deref() == Some("Seed Texture Mod")).unwrap();
+        assert_eq!(seed_tex.resolved_by, "library");
+        assert_eq!(seed_tex.library_source.as_deref(), Some("seed"));
+        assert!(seed_tex.assets.iter().any(|a| a.value == "custom\\seedtex.dds"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
