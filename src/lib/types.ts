@@ -280,3 +280,17 @@ export type LibraryListing = {
   entries: MergedEntry[];
   warning: string | null;
 };
+
+/** Every preset across the configured roots, resolved at once. */
+export type CollectionReport = {
+  total_presets: number;
+  parse_failures: number;
+  identified: IdentifiedGroup[];
+  unknown: AssetRef[];
+  vanilla: string[];
+  /** "kind|lowercased value" → number of presets referencing it. */
+  preset_counts: Record<string, number>;
+  api_key_present: boolean;
+  nexus_error: string | null;
+  library_warning: string | null;
+};

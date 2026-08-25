@@ -17,6 +17,7 @@
 use crate::detect::VORTEX_MANIFEST_NAME;
 use crate::jslot;
 use crate::nexus::{self, NexusModInfo, RateLimitInfo};
+use crate::scan;
 use crate::settings::{self, AppSettings, ModManagerKind};
 use md5::{Digest, Md5};
 use serde::Serialize;
@@ -215,17 +216,20 @@ fn extract(preset: &Value) -> Extracted {
         }
     }
 
-    let sorted = |map: HashMap<String, AssetRef>| -> Vec<AssetRef> {
-        let mut v: Vec<AssetRef> = map.into_values().collect();
-        v.sort_by(|a, b| a.value.to_ascii_lowercase().cmp(&b.value.to_ascii_lowercase()));
-        v
-    };
     Extracted {
-        plugins: sorted(plugins),
-        textures: sorted(textures),
-        morphs: sorted(morphs),
+        plugins: sort_refs(plugins),
+        textures: sort_refs(textures),
+        morphs: sort_refs(morphs),
         vanilla,
     }
+}
+
+/// Sort a dedup map into a stable Vec, case-insensitive by value — shared by
+/// `extract` and `collect_refs` so both sort identically.
+fn sort_refs(map: HashMap<String, AssetRef>) -> Vec<AssetRef> {
+    let mut v: Vec<AssetRef> = map.into_values().collect();
+    v.sort_by(|a, b| a.value.to_ascii_lowercase().cmp(&b.value.to_ascii_lowercase()));
+    v
 }
 
 // ---------------------------------------------------------------------------
@@ -915,9 +919,267 @@ pub async fn find_assets(
     .map_err(|e| format!("find assets task failed: {e}"))?
 }
 
+// ---------------------------------------------------------------------------
+// Collection Review — every preset across the configured roots, at once
+// ---------------------------------------------------------------------------
+
+/// Everything the parse phase produces; cached for `review_refresh`.
+#[derive(Clone)]
+pub(crate) struct CollectedRefs {
+    pub total_presets: usize,
+    pub parse_failures: usize,
+    pub plugins: Vec<AssetRef>,
+    pub textures: Vec<AssetRef>,
+    pub morphs: Vec<AssetRef>,
+    pub vanilla: Vec<String>,
+    /// "kind|lowercased value" → number of distinct presets referencing it.
+    pub preset_counts: HashMap<String, usize>,
+}
+
+/// Fold one preset's refs (already deduped within that preset by `extract`)
+/// into the shared accumulator map — same lowercase-key merge as `note_ref`,
+/// unioning `appeared_in` — and bump `preset_counts` once per ref, which is
+/// exactly once per (preset, ref) since `refs` never repeats a value.
+fn fold_preset_refs(
+    map: &mut HashMap<String, AssetRef>,
+    refs: &[AssetRef],
+    preset_counts: &mut HashMap<String, usize>,
+) {
+    for r in refs {
+        let key = r.value.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        let entry = map.entry(key.clone()).or_insert_with(|| AssetRef {
+            kind: r.kind.clone(),
+            value: r.value.clone(),
+            appeared_in: Vec::new(),
+        });
+        for section in &r.appeared_in {
+            if !entry.appeared_in.iter().any(|s| s == section) {
+                entry.appeared_in.push(section.clone());
+            }
+        }
+        *preset_counts.entry(format!("{}|{key}", r.kind)).or_insert(0) += 1;
+    }
+}
+
+/// Parse every configured preset (via `scan::scan_settings`), folding all
+/// references into one deduped union with a per-preset reference count for
+/// the review UI. Parse failures are counted, not fatal.
+pub(crate) fn collect_refs(
+    settings: &AppSettings,
+    progress: &mut dyn FnMut(FindProgress),
+) -> CollectedRefs {
+    let scanned = scan::scan_settings(settings);
+    let total_presets = scanned.files.len();
+    let mut parse_failures = 0usize;
+
+    let mut plugins: HashMap<String, AssetRef> = HashMap::new();
+    let mut textures: HashMap<String, AssetRef> = HashMap::new();
+    let mut morphs: HashMap<String, AssetRef> = HashMap::new();
+    let mut vanilla: Vec<String> = Vec::new();
+    let mut preset_counts: HashMap<String, usize> = HashMap::new();
+
+    for (i, file) in scanned.files.iter().enumerate() {
+        progress(FindProgress {
+            stage: "parsing".into(),
+            current: i + 1,
+            total: total_presets,
+            detail: file.file_name.clone(),
+        });
+        let preset = match jslot::parse_file(Path::new(&file.path)) {
+            Ok(v) => v,
+            Err(_) => {
+                parse_failures += 1;
+                continue;
+            }
+        };
+        let extracted = extract(&preset);
+        fold_preset_refs(&mut plugins, &extracted.plugins, &mut preset_counts);
+        fold_preset_refs(&mut textures, &extracted.textures, &mut preset_counts);
+        fold_preset_refs(&mut morphs, &extracted.morphs, &mut preset_counts);
+        for v in extracted.vanilla {
+            if !vanilla.iter().any(|x| x.eq_ignore_ascii_case(&v)) {
+                vanilla.push(v);
+            }
+        }
+    }
+
+    CollectedRefs {
+        total_presets,
+        parse_failures,
+        plugins: sort_refs(plugins),
+        textures: sort_refs(textures),
+        morphs: sort_refs(morphs),
+        vanilla,
+        preset_counts,
+    }
+}
+
+/// Cache of the last `review_collection` run's parsed refs, so
+/// `review_refresh` can re-resolve (e.g. after a library edit) without
+/// re-parsing every preset on disk.
+static REVIEW_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<CollectedRefs>>> =
+    std::sync::OnceLock::new();
+
+fn review_cache() -> &'static std::sync::Mutex<Option<CollectedRefs>> {
+    REVIEW_CACHE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+#[derive(Debug, Serialize)]
+pub struct CollectionReport {
+    pub total_presets: usize,
+    pub parse_failures: usize,
+    pub identified: Vec<IdentifiedGroup>,
+    pub unknown: Vec<AssetRef>,
+    pub vanilla: Vec<String>,
+    /// "kind|lowercased value" → number of presets referencing it.
+    pub preset_counts: HashMap<String, usize>,
+    pub api_key_present: bool,
+    pub nexus_error: Option<String>,
+    pub library_warning: Option<String>,
+}
+
+/// Build the response both `review_collection` and `review_refresh` return —
+/// shared so the two response shapes can't drift apart.
+fn assemble(
+    collected: &CollectedRefs,
+    output: ResolveOutput,
+    library_warning: Option<String>,
+) -> CollectionReport {
+    let mut vanilla = collected.vanilla.clone();
+    vanilla.extend(output.extra_vanilla);
+    CollectionReport {
+        total_presets: collected.total_presets,
+        parse_failures: collected.parse_failures,
+        identified: output.identified,
+        unknown: output.unknown,
+        vanilla,
+        preset_counts: collected.preset_counts.clone(),
+        api_key_present: output.api_key_present,
+        nexus_error: output.nexus_error,
+        library_warning,
+    }
+}
+
+/// Load the Asset Library from the app config dir — shared by both commands.
+fn library_for(app: &tauri::AppHandle) -> Result<crate::library::Library, String> {
+    use tauri::Manager;
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("failed to resolve app config dir: {e}"))?;
+    Ok(crate::library::load_from_dir(&config_dir))
+}
+
+/// Parse every configured preset and resolve every reference — the full
+/// Collection Review run. Caches the extracted refs so `review_refresh` can
+/// re-resolve without re-parsing every preset.
+#[tauri::command]
+pub async fn review_collection(
+    app: tauri::AppHandle,
+    on_progress: tauri::ipc::Channel<FindProgress>,
+) -> Result<CollectionReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = settings::load_from_app(&app)?;
+        let mut progress = |p: FindProgress| {
+            let _ = on_progress.send(p);
+        };
+        let collected = collect_refs(&settings, &mut progress);
+        *review_cache().lock().unwrap() = Some(collected.clone());
+
+        let ctx = build_context(&settings);
+        let library = library_for(&app)?;
+        let output = resolve_refs(
+            Some(&app),
+            &settings,
+            &ctx,
+            &library,
+            &collected.plugins,
+            &collected.textures,
+            &collected.morphs,
+            &mut progress,
+        );
+        Ok(assemble(&collected, output, library.warning))
+    })
+    .await
+    .map_err(|e| format!("collection review task failed: {e}"))?
+}
+
+/// Re-resolve the refs cached by the last `review_collection` run — no disk
+/// re-scan, just resolution (e.g. after the user edits the Asset Library).
+#[tauri::command]
+pub async fn review_refresh(
+    app: tauri::AppHandle,
+    on_progress: tauri::ipc::Channel<FindProgress>,
+) -> Result<CollectionReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = settings::load_from_app(&app)?;
+        let collected = review_cache()
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| "Run a collection review first.".to_string())?;
+
+        let ctx = build_context(&settings);
+        let library = library_for(&app)?;
+        let mut progress = |p: FindProgress| {
+            let _ = on_progress.send(p);
+        };
+        let output = resolve_refs(
+            Some(&app),
+            &settings,
+            &ctx,
+            &library,
+            &collected.plugins,
+            &collected.textures,
+            &collected.morphs,
+            &mut progress,
+        );
+        Ok(assemble(&collected, output, library.warning))
+    })
+    .await
+    .map_err(|e| format!("collection refresh task failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collection_aggregation_dedupes_and_counts() {
+        let dir = std::env::temp_dir().join(format!("lineage-collect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let presets = dir.join("presets");
+        std::fs::create_dir_all(&presets).unwrap();
+        let preset = |plugins: &[&str]| {
+            let mods: Vec<String> = plugins.iter().enumerate()
+                .map(|(i, p)| format!(r#"{{"index": {i}, "name": "{p}"}}"#)).collect();
+            format!(r#"{{"mods": [{}]}}"#, mods.join(","))
+        };
+        std::fs::write(presets.join("a.jslot"), preset(&["Shared.esp", "OnlyA.esp"])).unwrap();
+        std::fs::write(presets.join("b.jslot"), preset(&["Shared.esp"])).unwrap();
+        std::fs::write(presets.join("broken.jslot"), "{ nope").unwrap();
+
+        let settings = crate::settings::AppSettings {
+            jslot_roots: vec![crate::settings::JslotRoot {
+                id: "t".into(), label: "T".into(),
+                path: presets.display().to_string(),
+                kind: crate::settings::RootKind::Plain,
+            }],
+            ..Default::default()
+        };
+        let collected = collect_refs(&settings, &mut |_| {});
+        assert_eq!(collected.total_presets, 3);
+        assert_eq!(collected.parse_failures, 1);
+        // Dedup: Shared.esp appears once with preset_count 2.
+        assert_eq!(collected.preset_counts.get("plugin|shared.esp"), Some(&2));
+        assert_eq!(collected.preset_counts.get("plugin|onlya.esp"), Some(&1));
+        let shared = collected.plugins.iter().filter(|r| r.value.eq_ignore_ascii_case("Shared.esp")).count();
+        assert_eq!(shared, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn extraction_reads_confirmed_sections() {

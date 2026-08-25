@@ -11,6 +11,7 @@ import type {
   BatchProgress,
   BatchRemoveReport,
   BatchScanReport,
+  CollectionReport,
   DetectedEnvironment,
   FindAssetsReport,
   FindProgress,
@@ -165,6 +166,24 @@ export async function libraryDeleteEntry(id: string): Promise<void> {
 
 export async function libraryRestoreSeed(id: string): Promise<void> {
   await invoke("library_restore_seed", { id });
+}
+
+// ---- collection review -----------------------------------------------------
+
+export async function reviewCollection(
+  onProgress?: (p: FindProgress) => void,
+): Promise<CollectionReport> {
+  const channel = new Channel<FindProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return await invoke<CollectionReport>("review_collection", { onProgress: channel });
+}
+
+export async function reviewRefresh(
+  onProgress?: (p: FindProgress) => void,
+): Promise<CollectionReport> {
+  const channel = new Channel<FindProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return await invoke<CollectionReport>("review_refresh", { onProgress: channel });
 }
 
 // ---- shared display helpers ----------------------------------------------

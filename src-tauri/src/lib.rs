@@ -91,6 +91,8 @@ pub fn run() {
             nexus::validate_nexus_key,
             nexus::get_rate_limit,
             assets::find_assets,
+            assets::review_collection,
+            assets::review_refresh,
             library::library_list,
             library::library_save_entries,
             library::library_delete_entry,
