@@ -96,6 +96,94 @@ fn is_vanilla_plugin(name: &str) -> bool {
     ) || (l.starts_with("cc") && (l.ends_with(".esm") || l.ends_with(".esl")))
 }
 
+/// Vanilla `Actors\Character\<folder>\` head/body skin folders. A texture
+/// sitting directly inside one of these is a base-game skin slot: every skin
+/// mod (Fair Skin, Demoniac, Bijin, Tempered Skins, ...) replaces those files
+/// *in place* at the same path, so the path identifies nothing. Resolving one
+/// would just name whichever skin the scanning machine happens to have
+/// installed -- which is why the same preset used to yield different
+/// "requirements" on different setups.
+const VANILLA_SKIN_FOLDERS: &[&str] = &[
+    "female",
+    "male",
+    "femaleorc",
+    "orcmale",
+    "argonian",
+    "argonianfemale",
+    "argonianmale",
+    "khajiit",
+    "khajiitfemale",
+    "khajiitmale",
+    "bretonfemale",
+    "bretonmale",
+    "darkelffemale",
+    "darkelfmale",
+    "highelffemale",
+    "highelfmale",
+    "imperialfemale",
+    "imperialmale",
+    "nordfemale",
+    "nordmale",
+    "redguardfemale",
+    "redguardmale",
+    "woodelffemale",
+    "woodelfmale",
+    "elderfemale",
+    "eldermale",
+];
+
+/// Vanilla tint-mask folder -- the warpaint / dirt / makeup masks that ship
+/// with the game. Mods in here are replacers at the same paths, so like the
+/// skin slots they are taste, not a requirement.
+const VANILLA_TINTMASK_DIR: &str = r"actors\character\character assets\tintmasks\";
+
+/// True for texture paths every install already satisfies: base-game skin
+/// slots and vanilla tint masks. Those are never a requirement worth listing.
+///
+/// Deliberately *not* a plain `Actors\Character\` prefix test -- mods ship
+/// their own subfolders inside that tree (Racial Skin Variance under
+/// `Actors\Character\RSV\`, overlay packs under `Character Assets\Overlays\`,
+/// pubic-hair mods, complexion packs under `Female\FaceDetails\`) and those
+/// are real dependencies. The skin-slot rule therefore demands a known
+/// vanilla race folder with the file sitting *directly* inside it.
+fn is_vanilla_skin_texture(path: &str) -> bool {
+    let lower = path.trim().to_ascii_lowercase().replace('/', "\\");
+    let mut p = lower.trim_start_matches('\\');
+    p = p.strip_prefix("data\\").unwrap_or(p);
+    p = p.strip_prefix("textures\\").unwrap_or(p);
+    if p.starts_with(VANILLA_TINTMASK_DIR) {
+        return true;
+    }
+    let seg: Vec<&str> = p.split('\\').collect();
+    seg.len() == 4
+        && seg[0] == "actors"
+        && seg[1] == "character"
+        && VANILLA_SKIN_FOLDERS.contains(&seg[2])
+}
+
+/// Record a texture reference -- unless it is a vanilla skin slot or tint
+/// mask, which is routed to `vanilla` instead. The preset's reference stays
+/// visible there (the same honesty the vanilla-plugin list provides) without
+/// ever being resolved to a mod or presented as a requirement.
+fn note_texture(
+    map: &mut HashMap<String, AssetRef>,
+    vanilla: &mut Vec<String>,
+    value: &str,
+    section: &str,
+) {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if is_vanilla_skin_texture(trimmed) {
+        if !vanilla.iter().any(|v| v.eq_ignore_ascii_case(trimmed)) {
+            vanilla.push(trimmed.to_string());
+        }
+        return;
+    }
+    note_ref(map, "texture", trimmed, section);
+}
+
 struct Extracted {
     plugins: Vec<AssetRef>,
     textures: Vec<AssetRef>,
@@ -120,22 +208,27 @@ fn note_ref(map: &mut HashMap<String, AssetRef>, kind: &str, value: &str, sectio
 
 /// Walk `overrides`-style sections for embedded asset paths (string values
 /// ending in .dds/.nif/.tri).
-fn collect_path_strings(value: &Value, section: &str, out: &mut HashMap<String, AssetRef>) {
+fn collect_path_strings(
+    value: &Value,
+    section: &str,
+    out: &mut HashMap<String, AssetRef>,
+    vanilla: &mut Vec<String>,
+) {
     match value {
         Value::String(s) => {
             let l = s.to_ascii_lowercase();
             if l.ends_with(".dds") || l.ends_with(".nif") || l.ends_with(".tri") {
-                note_ref(out, "texture", s, section);
+                note_texture(out, vanilla, s, section);
             }
         }
         Value::Array(items) => {
             for v in items {
-                collect_path_strings(v, section, out);
+                collect_path_strings(v, section, out, vanilla);
             }
         }
         Value::Object(obj) => {
             for v in obj.values() {
-                collect_path_strings(v, section, out);
+                collect_path_strings(v, section, out, vanilla);
             }
         }
         _ => {}
@@ -200,14 +293,14 @@ fn extract(preset: &Value) -> Extracted {
         if let Some(items) = preset.get(section).and_then(Value::as_array) {
             for item in items {
                 if let Some(tex) = item.get("texture").and_then(Value::as_str) {
-                    note_ref(&mut textures, "texture", tex, section);
+                    note_texture(&mut textures, &mut vanilla, tex, section);
                 }
             }
         }
     }
     for section in ["overrides", "skinOverrides"] {
         if let Some(v) = preset.get(section) {
-            collect_path_strings(v, section, &mut textures);
+            collect_path_strings(v, section, &mut textures, &mut vanilla);
         }
     }
     if let Some(customs) = preset
@@ -613,6 +706,21 @@ pub(crate) fn resolve_refs(
         let Some(hit) = hit else {
             if is_plugin {
                 unresolved_plugins.push(asset.clone());
+            } else if let Some(hit) = library.match_entry(&asset.kind, &asset.value, false) {
+                // A named library entry outranks the vanilla-shape
+                // heuristic below. Mods do ship inside the vanilla tree
+                // (Racial Skin Variance lives under Actors\Character\RSV\),
+                // and an entry means someone decided that path names a
+                // real mod.
+                add_library_group(
+                    &mut groups,
+                    hit,
+                    asset,
+                    app,
+                    &api_key,
+                    &mut nexus_down,
+                    &mut nexus_error,
+                );
             } else {
                 let normalized_texture = asset.value.to_ascii_lowercase().replace('/', "\\");
                 let vanilla_shaped = normalized_texture.starts_with("actors\\character\\")
@@ -622,21 +730,12 @@ pub(crate) fn resolve_refs(
                     // certainly ships in the vanilla BSAs. RaceMenu overlays
                     // (Actors\Character\Overlays\...) are excluded — they
                     // never ship in vanilla BSAs, so an unfound one must
-                    // still fall through to the library gap-fill below.
+                    // still be reported rather than called vanilla.
                     if !extra_vanilla.iter().any(|v| v.eq_ignore_ascii_case(&asset.value)) {
                         extra_vanilla.push(asset.value.clone());
                     }
                 } else {
-                    unknown_or_library(
-                        &mut groups,
-                        &mut unknown,
-                        library,
-                        asset,
-                        app,
-                        &api_key,
-                        &mut nexus_down,
-                        &mut nexus_error,
-                    );
+                    unknown.push(asset.clone());
                 }
             }
             continue;
@@ -1383,9 +1482,18 @@ mod tests {
                 // tracked mod folder — must resolve via the library before
                 // find_texture attribution ever runs.
                 mk("user-tex", "user", "texture", "hair\\uservalue.dds", "exact", "User Texture Mod"),
-                // (b) Seed entry matching a vanilla-shaped path — the vanilla
-                // exemption gate must win; this entry must never claim it.
-                mk("seed-vanilla-tex", "seed", "texture", "Actors\\Character\\FooBar.dds", "exact", "Should Not Claim Vanilla"),
+                // (b) Seed entry for a mod that ships INSIDE the vanilla tree.
+                // Racial Skin Variance lives at Actors\Character\RSV\, so the
+                // old "anything under Actors\Character\ is vanilla" gate used
+                // to swallow it. A named entry now outranks that heuristic.
+                mk(
+                    "seed-rsv-tex",
+                    "seed",
+                    "texture",
+                    "Actors\\Character\\RSV\\",
+                    "prefix",
+                    "Racial Skin Variance",
+                ),
                 // (c) Seed entry for a non-vanilla texture resolved nowhere else.
                 mk("seed-tex", "seed", "texture", "custom\\seedtex.dds", "exact", "Seed Texture Mod"),
                 // (d) Seed entry for a RaceMenu overlay texture — despite
@@ -1410,6 +1518,7 @@ mod tests {
         let textures = vec![
             refs("texture", "hair\\uservalue.dds"),
             refs("texture", "Actors\\Character\\FooBar.dds"),
+            refs("texture", "Actors\\Character\\RSV\\DarkElfMale\\MaleHead.dds"),
             refs("texture", "custom\\seedtex.dds"),
             refs("texture", "Actors\\Character\\Overlays\\FooOverlay\\tex.dds"),
         ];
@@ -1426,11 +1535,28 @@ mod tests {
         assert_eq!(user_tex.name.as_deref(), Some("User Texture Mod"));
         assert_eq!(user_tex.library_source.as_deref(), Some("user"));
 
-        // (b) Vanilla-shaped path classifies as vanilla, not as a library hit,
-        // even though a seed entry matches its exact pattern.
+        // (b) A vanilla-shaped path that NO library entry names still falls to
+        // the vanilla-shape gate rather than the unknown list.
         assert!(out.extra_vanilla.iter().any(|v| v.eq_ignore_ascii_case("Actors\\Character\\FooBar.dds")));
-        assert!(out.identified.iter().all(|g| g.name.as_deref() != Some("Should Not Claim Vanilla")));
         assert!(out.unknown.iter().all(|a| a.value != "Actors\\Character\\FooBar.dds"));
+
+        // (b2) ...but a named library entry outranks that gate. The library is
+        // explicit human knowledge; the gate is a guess, and a guess that
+        // overrides a correct entry leaves the user no way to fix it from the
+        // UI. Genuine base-game skin slots and tint masks cannot reach here at
+        // all — `is_vanilla_skin_texture` drops them during extraction, before
+        // any library lookup — so this precedence cannot mislabel vanilla.
+        let rsv = out
+            .identified
+            .iter()
+            .find(|g| g.name.as_deref() == Some("Racial Skin Variance"))
+            .unwrap();
+        assert_eq!(rsv.resolved_by, "library");
+        assert_eq!(rsv.library_source.as_deref(), Some("seed"));
+        assert!(out
+            .extra_vanilla
+            .iter()
+            .all(|v| !v.to_ascii_lowercase().contains("rsv")));
 
         // (c) Non-vanilla texture resolved nowhere else is claimed by the seed entry.
         let seed_tex = out.identified.iter().find(|g| g.name.as_deref() == Some("Seed Texture Mod")).unwrap();
@@ -1486,5 +1612,153 @@ mod tests {
         assert_eq!(mod_ids.iter().filter(|id| **id == Some(13630)).count(), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vanilla_skin_slots_and_tintmasks_are_not_requirements() {
+        let preset: Value = serde_json::from_str(
+            r#"{
+                "faceTextures": [
+                    {"index": 0, "texture": "Actors\\Character\\Female\\FemaleHead.dds"},
+                    {"index": 1, "texture": "Actors\\Character\\BretonFemale\\FemaleHead_msn.dds"},
+                    {"index": 3, "texture": "Actors\\Character\\Male\\BlankDetailmap.dds"},
+                    {"index": 4, "texture": "Actors\\Character\\RSV\\DarkElfMale\\MaleHead.dds"},
+                    {"index": 5, "texture": "ColdSun\\Visions\\Body\\FemaleHead_sk.dds"},
+                    {"index": 6, "texture": "Actors\\Character\\Female\\FaceDetails\\FaceFemale_0.dds"}
+                ],
+                "tintInfo": [
+                    {"color": 1, "index": 0, "texture": "Actors\\Character\\Character Assets\\TintMasks\\SkinTone.dds"},
+                    {"color": 2, "index": 1, "texture": "Actors\\Character\\Overlays\\FMS\\Eyeliner\\Wing 2.dds"},
+                    {"color": 3, "index": 2, "texture": "Actors\\Character\\Character Assets\\Overlays\\Frecklemania2\\Female\\Face\\HeFace3.dds"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let e = extract(&preset);
+        let tex: Vec<&str> = e.textures.iter().map(|t| t.value.as_str()).collect();
+
+        // Base-game skin slots + vanilla tint masks: every install already has
+        // them, so they are recorded as vanilla and never offered as a
+        // requirement — whichever skin/warpaint replacer happens to be installed.
+        for dropped in [
+            r"Actors\Character\Female\FemaleHead.dds",
+            r"Actors\Character\BretonFemale\FemaleHead_msn.dds",
+            r"Actors\Character\Male\BlankDetailmap.dds",
+            r"Actors\Character\Character Assets\TintMasks\SkinTone.dds",
+        ] {
+            assert!(!tex.contains(&dropped), "{dropped} should not be a requirement");
+            assert!(
+                e.vanilla.iter().any(|v| v == dropped),
+                "{dropped} should be listed as vanilla"
+            );
+        }
+
+        // Mods shipping inside (or alongside) the vanilla tree are real
+        // dependencies and must survive.
+        for kept in [
+            r"Actors\Character\RSV\DarkElfMale\MaleHead.dds",
+            r"ColdSun\Visions\Body\FemaleHead_sk.dds",
+            r"Actors\Character\Female\FaceDetails\FaceFemale_0.dds",
+            r"Actors\Character\Overlays\FMS\Eyeliner\Wing 2.dds",
+            r"Actors\Character\Character Assets\Overlays\Frecklemania2\Female\Face\HeFace3.dds",
+        ] {
+            assert!(tex.contains(&kept), "{kept} should still be a requirement");
+        }
+    }
+
+    #[test]
+    fn is_vanilla_skin_texture_boundaries() {
+        // A vanilla skin slot, however the path happens to be spelled.
+        assert!(is_vanilla_skin_texture(
+            r"Actors\Character\Female\FemaleHead.dds"
+        ));
+        assert!(is_vanilla_skin_texture(
+            "actors/character/male/malehead_sk.dds"
+        ));
+        assert!(is_vanilla_skin_texture(
+            r"Data\Textures\Actors\Character\FemaleOrc\FemaleHeadOrc_msn.dds"
+        ));
+        assert!(is_vanilla_skin_texture(
+            r"Actors\Character\Character Assets\TintMasks\FemaleHead_Cheeks.dds"
+        ));
+
+        // A mod's own folder inside the vanilla tree is not a vanilla slot.
+        assert!(!is_vanilla_skin_texture(
+            r"Actors\Character\RSV\DarkElfMale\MaleHead.dds"
+        ));
+        // Neither is a mod subfolder nested under a vanilla race folder —
+        // the file must sit directly in the race folder to count.
+        assert!(!is_vanilla_skin_texture(
+            r"Actors\Character\Female\FaceDetails\FaceFemale_0.dds"
+        ));
+        // Overlays and non-vanilla roots are untouched.
+        assert!(!is_vanilla_skin_texture(
+            r"Actors\Character\Overlays\FMS\Eyeliner\Wing 2.dds"
+        ));
+        assert!(!is_vanilla_skin_texture(
+            r"Actors\Character\Character Assets\Overlays\Frecklemania2\Female\Face\HeFace3.dds"
+        ));
+        assert!(!is_vanilla_skin_texture(
+            r"ColdSun\Visions\Body\FemaleHead_sk.dds"
+        ));
+        assert!(!is_vanilla_skin_texture(r"!COR\Head\FemaleHead.dds"));
+    }
+
+    /// The skin-slot / tint-mask rule, checked against the real preset
+    /// collection rather than a synthetic preset — an over-reaching rule that
+    /// swallowed a real mod's textures would still pass the unit tests above.
+    #[test]
+    fn vanilla_skin_rule_against_real_presets() {
+        let corpus = std::path::Path::new(r"D:\Nordic Souls\mods");
+        if !corpus.is_dir() {
+            return;
+        }
+        let mut textures: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut vanilla: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut presets = 0usize;
+        for entry in walkdir::WalkDir::new(corpus).into_iter().flatten() {
+            let is_jslot = entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .map(|e| e.eq_ignore_ascii_case("jslot"))
+                    .unwrap_or(false);
+            if !is_jslot {
+                continue;
+            }
+            let Ok(preset) = jslot::parse_file(entry.path()) else {
+                continue;
+            };
+            presets += 1;
+            let e = extract(&preset);
+            textures.extend(e.textures.iter().map(|t| t.value.to_ascii_lowercase()));
+            vanilla.extend(e.vanilla.iter().map(|v| v.to_ascii_lowercase()));
+        }
+        assert!(presets > 100, "expected a real corpus, saw {presets} presets");
+
+        // Nothing the rule dropped may survive as a requirement...
+        assert!(
+            !textures.iter().any(|t| is_vanilla_skin_texture(t)),
+            "a vanilla skin slot or tint mask leaked into the requirement list"
+        );
+        // ...and the two headline cases really are being dropped.
+        for dropped in [
+            r"actors\character\female\femalehead.dds",
+            r"actors\character\character assets\tintmasks\skintone.dds",
+        ] {
+            assert!(!textures.contains(dropped), "{dropped} should be dropped");
+            assert!(vanilla.contains(dropped), "{dropped} should be vanilla");
+        }
+
+        // The rule must NOT over-reach: mods living inside the vanilla tree
+        // stay requirements. Racial Skin Variance sits at Actors\Character\RSV\.
+        assert!(
+            textures.iter().any(|t| t.contains(r"\rsv\")),
+            "Racial Skin Variance textures were swallowed by the vanilla rule"
+        );
+        assert!(
+            textures.iter().any(|t| t.contains(r"\overlays\")),
+            "overlay textures were swallowed by the vanilla rule"
+        );
     }
 }

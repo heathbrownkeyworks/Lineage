@@ -302,5 +302,13 @@
     "match_type": "prefix",
     "name": "Skin Feature Overlays SE",
     "url": "https://www.nexusmods.com/skyrimspecialedition/mods/20183"
+  },
+  {
+    "id": "seed-rsv-skin",
+    "kind": "texture",
+    "pattern": "Actors\\Character\\RSV\\",
+    "match_type": "prefix",
+    "name": "Racial Skin Variance",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/81668"
   }
 ]

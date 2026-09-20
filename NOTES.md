@@ -173,9 +173,25 @@ normalized. This is the only unavoidable reformatting case found.
 - **Snapshot zip entries** are `NNNN-<filename>` (index-prefixed) rather than
   full relative paths — same-named presets from different mods can share one
   snapshot; the JSON sidecar carries the absolute restore path for each entry.
+- **Vanilla skin textures are never requirements.** `faceTextures` records the
+  head TextureSet slots and `tintInfo` the vanilla tint masks, so nearly every
+  preset references `Actors\Character\<Race>\FemaleHead*.dds` and
+  `Actors\Character\Character Assets\TintMasks\*`. Every skin/warpaint mod
+  replaces those files *in place* at the same paths, so the path identifies
+  nothing — and resolving it used to name whichever replacer the scanning
+  machine had installed, making the "requirements" for one preset differ per
+  user. `assets.rs::is_vanilla_skin_texture` drops both classes during
+  extraction (into the vanilla list, not silently), before any lookup runs.
+  The skin rule demands a *known vanilla race folder with the file directly
+  inside it*, because mods do ship within that tree: Racial Skin Variance at
+  `Actors\Character\RSV\<Race>\` (seed entry, nexus/81668), overlay packs at
+  `Character Assets\Overlays\`, complexions at `Female\FaceDetails\`.
 - **Texture attribution** — a texture path that resolves to no loose file
-  anywhere but starts with `actors\character\` is classified "base game"
-  (vanilla BSAs aren't parsed); anything else unresolved goes to Unknown.
+  anywhere is first offered to the asset library; a named entry wins, because
+  the library is explicit knowledge and the vanilla gate below it is only a
+  guess (and a guess that overrides a correct entry can't be fixed from the
+  UI). Otherwise a path starting with `actors\character\` is classified
+  "base game" (vanilla BSAs aren't parsed); anything else goes to Unknown.
 - **Morph names** never resolve to files; they're always listed under Unknown
   with a best-guess origin hint for recognizable prefixes (`EFM_`,
   `ECE_`/`CME_`, `XPMSE*`).
