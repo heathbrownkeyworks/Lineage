@@ -13,8 +13,11 @@
     /** Prefill for editing an existing attribution/entry. */
     initialName?: string;
     initialUrl?: string;
-    /** Scratch-mode-only prefill (Asset Library editing an existing entry):
-     *  the entry's kind/pattern/match type, so editing doesn't start blank. */
+    /** Prefill for the entry being written: kind, pattern and match type.
+     *  Set when editing an existing library entry (no references), and when a
+     *  group of unknown references already knows the one pattern that covers
+     *  them all. Left unset, a dialog opened with references falls back to an
+     *  exact match on the first one. */
     initialKind?: Kind;
     initialPattern?: string;
     initialMatchType?: "exact" | "prefix";
@@ -71,9 +74,13 @@
         selectedKind = initialKind ?? "plugin";
         pattern = initialPattern ?? "";
       } else {
-        scope = "exact";
-        selectedKind = (references[0]?.kind as Kind | undefined) ?? "plugin";
-        pattern = references[0]?.value ?? "";
+        // A caller that already knows the pattern covering every reference —
+        // a group of unknown refs sharing a mod folder — prefills it, so the
+        // common case is one click instead of retyping the folder. Without
+        // that prefill this falls back to an exact match on the first ref.
+        scope = initialMatchType ?? "exact";
+        selectedKind = initialKind ?? (references[0]?.kind as Kind | undefined) ?? "plugin";
+        pattern = initialPattern ?? references[0]?.value ?? "";
       }
       checked = new Set(references.map(refKey));
       if (!dialog.open) dialog.showModal();

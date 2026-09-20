@@ -284,12 +284,26 @@ export type LibraryListing = {
   warning: string | null;
 };
 
+/** One library entry's worth of unknown references — a mod's folder, a
+ *  loose-file name prefix, or a morph family. Grouping is what makes the
+ *  Unknown queue finishable: a mod with forty overlay textures is one
+ *  decision, not forty. */
+export type UnknownGroup = {
+  key: string;
+  kind: "plugin" | "texture" | "morph";
+  pattern: string;
+  match_type: "exact" | "prefix";
+  assets: AssetRef[];
+};
+
 /** Every preset across the configured roots, resolved at once. */
 export type CollectionReport = {
   total_presets: number;
   parse_failures: number;
   identified: IdentifiedGroup[];
   unknown: AssetRef[];
+  /** `unknown`, collapsed into the library entries that would cover it. */
+  unknown_groups: UnknownGroup[];
   vanilla: string[];
   /** "kind|lowercased value" → number of presets referencing it. */
   preset_counts: Record<string, number>;

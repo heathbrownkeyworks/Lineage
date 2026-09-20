@@ -9,6 +9,18 @@ use std::path::{Path, PathBuf};
 
 const SEED_JSON: &str = include_str!("../resources/seed-library.json");
 
+/// Canonical comparison form for an asset reference: lowercase, backslashes,
+/// and no leading `Data\` / `Textures\`. Shared by the library matcher and the
+/// asset analysis in `assets.rs`; the two have to agree, or the pattern shown
+/// for a group of unknown references would not match those references.
+pub(crate) fn normalize_ref(s: &str) -> String {
+    let lower = s.trim().to_ascii_lowercase().replace('/', "\\");
+    let mut p = lower.trim_start_matches('\\');
+    p = p.strip_prefix("data\\").unwrap_or(p);
+    p = p.strip_prefix("textures\\").unwrap_or(p);
+    p.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LibraryEntry {
     /// "user-<unix-millis>" or "seed-<slug>".
@@ -115,18 +127,21 @@ impl Library {
     /// longer prefix beats shorter, user beats seed. `user_only` restricts to
     /// user entries (the override layer that beats the automatic pipeline).
     pub fn match_entry(&self, kind: &str, value: &str, user_only: bool) -> Option<&MergedEntry> {
-        // Normalize slashes unconditionally: plugin/morph patterns and
-        // values never contain slashes, so this only affects texture refs,
-        // where a forward-slash value must still hit a backslash pattern
-        // (and vice versa).
-        let value_l = value.to_ascii_lowercase().replace('/', "\\");
+        // Both sides go through `normalize_ref`: plugin/morph patterns and
+        // values never contain slashes, so this only affects texture refs.
+        // There a forward-slash value must still hit a backslash pattern,
+        // and — because presets spell the same mod's path both with and
+        // without a `Data\Textures\` lead-in — one folder pattern has to
+        // claim both spellings, or an entry silently leaves some of the very
+        // references it was created from unmatched.
+        let value_l = normalize_ref(value);
         self.entries
             .iter()
             .filter(|m| m.enabled)
             .filter(|m| !user_only || m.source == "user")
             .filter(|m| m.entry.kind.eq_ignore_ascii_case(kind))
             .filter(|m| {
-                let p = m.entry.pattern.to_ascii_lowercase().replace('/', "\\");
+                let p = normalize_ref(&m.entry.pattern);
                 match m.entry.match_type.as_str() {
                     "prefix" => value_l.starts_with(&p),
                     _ => value_l == p,
@@ -507,5 +522,54 @@ mod tests {
         );
         assert_eq!(nexus_mod_id_from_url("https://vectorplexus.com/files/file/283-high-poly-head/"), None);
         assert_eq!(nexus_mod_id_from_url("not a url"), None);
+    }
+
+    #[test]
+    fn match_entry_ignores_a_data_textures_lead_in() {
+        // Presets spell the same mod's path both ways. One folder entry has
+        // to claim both, otherwise an entry created from a group of unknown
+        // references fails to match some of those very references.
+        let dir = temp_dir("data-textures-prefix");
+        let file = UserLibraryFile {
+            entries: vec![user_entry(
+                "user-1",
+                "texture",
+                "Actors\\Character\\PubicHairStyles\\",
+                "prefix",
+            )],
+            disabled_seed_ids: vec![],
+        };
+        save_user_file(&dir, &file).unwrap();
+        let lib = load_from_dir(&dir);
+        for value in [
+            "Actors\\Character\\PubicHairStyles\\a.dds",
+            "Data\\Textures\\Actors\\Character\\PubicHairStyles\\a.dds",
+            "textures/actors/character/pubichairstyles/a.dds",
+        ] {
+            assert_eq!(
+                lib.match_entry("texture", value, false).map(|m| m.entry.id.as_str()),
+                Some("user-1"),
+                "{value} should match the folder entry"
+            );
+        }
+        // A pattern that itself carries the lead-in still matches a value
+        // without it — both sides are normalized.
+        let file = UserLibraryFile {
+            entries: vec![user_entry(
+                "user-2",
+                "texture",
+                "Data\\Textures\\Actors\\Character\\PubicHairStyles\\",
+                "prefix",
+            )],
+            disabled_seed_ids: vec![],
+        };
+        save_user_file(&dir, &file).unwrap();
+        let lib = load_from_dir(&dir);
+        assert_eq!(
+            lib.match_entry("texture", "Actors\\Character\\PubicHairStyles\\a.dds", false)
+                .map(|m| m.entry.id.as_str()),
+            Some("user-2")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

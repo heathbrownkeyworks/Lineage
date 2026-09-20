@@ -205,6 +205,32 @@ normalized. This is the only unavoidable reformatting case found.
   (`%APPDATA%\com.coldsun.lineage\library.json`). `library::load_from_dir`
   parses and merges both at report time; the seed file itself is never
   written to at runtime, only read.
+- **The Unknown queue is grouped, not flat.** Collection Review over the
+  whole collection leaves roughly a thousand unattributed references, and one
+  row per reference is a thousand modal round-trips — enough that the queue
+  simply doesn't get finished. `assets.rs::group_unknown` collapses them into
+  the library entries that would cover them: ~700 texture paths become ~70
+  groups, 200-odd morphs become ~20. Three rules, in order:
+  1. **Mod folder** — the first path segment that isn't a shared container
+     (`GENERIC_PATH_SEGMENTS`: actors, character, character assets, overlays,
+     data, textures). `Actors\Character\Overlays\Koralina_Male\` is one mod
+     however deep its own subfolders go.
+  2. **Filename prefix** — when every folder is generic the file is loose in
+     a shared directory, and its own leading token is the only handle:
+     `Actors\empyreancs_f_10_a.dds` → `Actors\empyreancs_`. Morph families
+     (`EXPR_`, `SPG_`) group the same way, which is how the seed entries
+     already identify slider packs.
+  3. **Neither** — one exact-match group of its own. Nothing is generalized
+     on a guess.
+  Plugin names have no shared structure, so each is its own group.
+- **`Data\Textures\` is a spelling, not a mod.** Presets reference the same
+  mod's textures both with and without that lead-in.
+  `library::normalize_ref` strips it (and normalizes case and slashes) on
+  both sides of every comparison, so one folder entry claims both spellings.
+  Before that, a grouped entry would have failed to match some of the very
+  references it was created from. `assets.rs` shares the same function
+  deliberately — if the grouping and the matching disagreed, a group would
+  display a pattern that doesn't cover it.
 - **Precedence rule: user > automatic > seed.** A manual library entry
   (kind, match_type, pattern — the "shadow key") always wins over a seed
   entry covering the same pattern; the shadowed seed entry is marked

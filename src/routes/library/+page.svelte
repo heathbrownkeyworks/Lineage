@@ -24,7 +24,7 @@
     reviewRefresh,
   } from "$lib/tauri";
   import { libraryReview } from "$lib/stores/library.svelte";
-  import type { AssetRef, FindProgress, IdentifiedGroup, MergedEntry } from "$lib/types";
+  import type { AssetRef, FindProgress, IdentifiedGroup, MergedEntry, UnknownGroup } from "$lib/types";
 
   // ---- Library list -------------------------------------------------------
 
@@ -151,17 +151,6 @@
     linkOpen = true;
   }
 
-  function openLinkForAsset(asset: AssetRef) {
-    linkReferences = [{ kind: asset.kind, value: asset.value }];
-    linkInitialName = "";
-    linkInitialUrl = "";
-    linkInitialKind = undefined;
-    linkInitialPattern = undefined;
-    linkInitialMatchType = undefined;
-    linkEntryId = undefined;
-    linkOpen = true;
-  }
-
   async function onLinkSaved() {
     await loadList();
     if (libraryReview.report) await refreshReview();
@@ -221,7 +210,7 @@
     return `${kind}|${value.toLowerCase()}`;
   }
 
-  function presetCountForGroup(g: IdentifiedGroup): number {
+  function presetCountForGroup(g: { assets: AssetRef[] }): number {
     const report = libraryReview.report;
     if (!report) return 0;
     let max = 0;
@@ -232,23 +221,37 @@
     return max;
   }
 
-  function presetCountForAsset(a: AssetRef): number {
-    const report = libraryReview.report;
-    if (!report) return 0;
-    return report.preset_counts[presetCountKey(a.kind, a.value)] ?? 0;
-  }
-
   const sortedIdentified = $derived.by(() => {
     const report = libraryReview.report;
     if (!report) return [];
     return [...report.identified].sort((a, b) => presetCountForGroup(b) - presetCountForGroup(a));
   });
 
-  const sortedUnknown = $derived.by(() => {
+  const sortedUnknownGroups = $derived.by(() => {
     const report = libraryReview.report;
     if (!report) return [];
-    return [...report.unknown].sort((a, b) => presetCountForAsset(b) - presetCountForAsset(a));
+    return [...report.unknown_groups].sort(
+      (a, b) => presetCountForGroup(b) - presetCountForGroup(a),
+    );
   });
+
+  /** The distinctive tail of a pattern — `Koralina_Male` out of a whole
+   *  overlay path. Searching the full path finds nothing. */
+  function searchTermForGroup(g: UnknownGroup): string {
+    const parts = g.pattern.split("\\").filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : g.pattern;
+  }
+
+  function openLinkForUnknownGroup(group: UnknownGroup) {
+    linkReferences = group.assets.map((a) => ({ kind: a.kind, value: a.value }));
+    linkInitialName = "";
+    linkInitialUrl = "";
+    linkInitialKind = group.kind;
+    linkInitialPattern = group.pattern;
+    linkInitialMatchType = group.match_type;
+    linkEntryId = undefined;
+    linkOpen = true;
+  }
 
   const groupTitle = (g: IdentifiedGroup) =>
     g.name ?? g.nexus?.name ?? g.mod_folder ?? "Unknown mod";
@@ -481,25 +484,53 @@
             </section>
           {/if}
 
-          {#if report.unknown.length > 0}
+          {#if report.unknown_groups.length > 0}
             <section>
-              <h3 class="sf-label">Unknown · {sortedUnknown.length}</h3>
+              <h3 class="sf-label">
+                Unknown · {sortedUnknownGroups.length}
+                {sortedUnknownGroups.length === 1 ? "group" : "groups"} · {report.unknown.length} references
+              </h3>
               <ul class="unknown-list">
-                {#each sortedUnknown as asset (asset.kind + asset.value)}
-                  <li class="unknown-row">
-                    <div class="unknown-main">
-                      <span class="chip-kind">{asset.kind}</span>
-                      <span class="mono val">{asset.value}</span>
-                      <span class="preset-count mono">{presetCountForAsset(asset)} presets</span>
+                {#each sortedUnknownGroups as group (group.key)}
+                  <li class="unknown-item">
+                    <div class="unknown-row">
+                      <div class="unknown-main">
+                        <span class="chip-kind">{group.kind}</span>
+                        <span class="mono val"
+                          >{group.pattern}{group.match_type === "prefix" ? "…" : ""}</span
+                        >
+                        <span class="preset-count mono">
+                          {group.assets.length}
+                          {group.assets.length === 1 ? "ref" : "refs"} · {presetCountForGroup(group)} presets
+                        </span>
+                      </div>
+                      <div class="unknown-actions">
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          onclick={() => openLinkForUnknownGroup(group)}
+                        >
+                          <LinkIcon size={13} /> Add Link
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          onclick={() => searchWeb(searchTermForGroup(group))}
+                        >
+                          <Globe size={13} /> Search the web
+                        </button>
+                      </div>
                     </div>
-                    <div class="unknown-actions">
-                      <button type="button" class="btn btn-ghost btn-sm" onclick={() => openLinkForAsset(asset)}>
-                        <LinkIcon size={13} /> Add Link
-                      </button>
-                      <button type="button" class="btn btn-ghost btn-sm" onclick={() => searchWeb(asset.value)}>
-                        <Globe size={13} /> Search the web
-                      </button>
-                    </div>
+                    {#if group.assets.length > 1}
+                      <details class="group-members">
+                        <summary class="sf-label">Show {group.assets.length} references</summary>
+                        <ul>
+                          {#each group.assets as asset (asset.kind + asset.value)}
+                            <li class="mono">{asset.value}</li>
+                          {/each}
+                        </ul>
+                      </details>
+                    {/if}
                   </li>
                 {/each}
               </ul>
@@ -870,6 +901,32 @@
   .val {
     font-size: 11.5px;
     color: var(--sf-text);
+    overflow-wrap: anywhere;
+  }
+  .unknown-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .group-members {
+    padding: 0 12px;
+  }
+  .group-members summary {
+    cursor: pointer;
+    padding: 2px 0;
+  }
+  .group-members ul {
+    list-style: none;
+    margin: 4px 0 6px;
+    padding: 0 0 0 10px;
+    border-left: 1px solid var(--sf-line);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .group-members li {
+    font-size: 11px;
+    color: var(--sf-text-3);
     overflow-wrap: anywhere;
   }
 </style>

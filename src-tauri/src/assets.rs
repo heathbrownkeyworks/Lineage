@@ -147,10 +147,7 @@ const VANILLA_TINTMASK_DIR: &str = r"actors\character\character assets\tintmasks
 /// are real dependencies. The skin-slot rule therefore demands a known
 /// vanilla race folder with the file sitting *directly* inside it.
 fn is_vanilla_skin_texture(path: &str) -> bool {
-    let lower = path.trim().to_ascii_lowercase().replace('/', "\\");
-    let mut p = lower.trim_start_matches('\\');
-    p = p.strip_prefix("data\\").unwrap_or(p);
-    p = p.strip_prefix("textures\\").unwrap_or(p);
+    let p = crate::library::normalize_ref(path);
     if p.starts_with(VANILLA_TINTMASK_DIR) {
         return true;
     }
@@ -1142,12 +1139,152 @@ fn review_cache() -> &'static std::sync::Mutex<Option<CollectedRefs>> {
     REVIEW_CACHE.get_or_init(|| std::sync::Mutex::new(None))
 }
 
+// ---------------------------------------------------------------------------
+// Unknown grouping
+// ---------------------------------------------------------------------------
+
+/// Path segments every mod shares — walked past when deciding where a
+/// texture's own folder begins. `Data\` and `Textures\` are here because some
+/// presets spell a path with them and some without, for the same mod.
+const GENERIC_PATH_SEGMENTS: &[&str] = &[
+    "actors",
+    "character",
+    "character assets",
+    "overlays",
+    "data",
+    "textures",
+];
+
+/// One library entry's worth of unknown references.
+///
+/// The Unknown list is flat — one row per path — and a mod that ships forty
+/// overlay textures is forty rows, each needing its own name and URL. Almost
+/// all of them share a folder (or, for loose files, a filename prefix), and
+/// one `prefix` entry claims the lot, so grouping turns the queue from
+/// roughly a thousand decisions into a couple of hundred.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnknownGroup {
+    /// Stable identity for a keyed list in the UI. `pattern` is not unique on
+    /// its own — a texture and a morph could in principle derive the same one.
+    pub key: String,
+    /// "texture" | "plugin" | "morph"
+    pub kind: String,
+    /// The library pattern this group would create, in the author's own
+    /// capitalization.
+    pub pattern: String,
+    /// "prefix" | "exact"
+    pub match_type: String,
+    pub assets: Vec<AssetRef>,
+}
+
+
+/// The leading token of a name, separator included — `empyreancs_` from
+/// `empyreancs_f_10_a`, `EXPR_` from `EXPR_BrowWidth`. Mods that drop files
+/// loose into a shared folder still prefix every one of them, and morph names
+/// carry their slider family the same way, so this is the only attribution
+/// handle those two cases offer.
+fn leading_token_prefix(name: &str) -> Option<String> {
+    let idx = name.find(['_', '-'])?;
+    let token = &name[..idx];
+    let usable = token.len() >= 3 && token.chars().all(|c| c.is_ascii_alphanumeric());
+    usable.then(|| name[..=idx].to_string())
+}
+
+/// Where a texture's group starts: the first segment that is a mod's own
+/// folder rather than a container. When every folder is generic the file is
+/// sitting loose and its filename prefix is used instead.
+fn texture_group_pattern(norm: &str) -> (String, &'static str) {
+    let seg: Vec<&str> = norm.split('\\').collect();
+    let (folders, file) = seg.split_at(seg.len() - 1);
+    for (i, s) in folders.iter().enumerate() {
+        if !GENERIC_PATH_SEGMENTS.contains(s) {
+            return (format!("{}\\", folders[..=i].join("\\")), "prefix");
+        }
+    }
+    let stem = file[0].split('.').next().unwrap_or(file[0]);
+    match leading_token_prefix(stem) {
+        Some(prefix) if folders.is_empty() => (prefix, "prefix"),
+        Some(prefix) => (format!("{}\\{prefix}", folders.join("\\")), "prefix"),
+        None => (norm.to_string(), "exact"),
+    }
+}
+
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> &'a str {
+    if s.len() >= prefix.len() && s[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        &s[prefix.len()..]
+    } else {
+        s
+    }
+}
+
+/// Recover the author's capitalization for a pattern derived from a
+/// lowercased path, so a grouped entry reads like the hand-written ones
+/// (`Actors\Character\Overlays\Koralina_Male\`, not all lowercase). Matching
+/// is case-insensitive either way; this is purely how it reads.
+fn display_pattern(lower_pattern: &str, sample: &str) -> String {
+    let cased = sample.trim().replace('/', "\\");
+    let cased = cased.trim_start_matches('\\');
+    let cased = strip_prefix_ci(cased, "data\\");
+    let cased = strip_prefix_ci(cased, "textures\\");
+    let n = lower_pattern.len();
+    if cased.len() >= n && cased.is_char_boundary(n) && cased[..n].eq_ignore_ascii_case(lower_pattern)
+    {
+        cased[..n].to_string()
+    } else {
+        lower_pattern.to_string()
+    }
+}
+
+/// Collapse the flat Unknown list into the smallest set of library entries
+/// that would cover it. Plugin names have no shared structure to exploit, so
+/// each stays its own single-asset group.
+pub(crate) fn group_unknown(unknown: &[AssetRef]) -> Vec<UnknownGroup> {
+    let mut groups: Vec<UnknownGroup> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for asset in unknown {
+        let (pattern, match_type) = match asset.kind.as_str() {
+            "texture" => texture_group_pattern(&crate::library::normalize_ref(&asset.value)),
+            "morph" => match leading_token_prefix(asset.value.trim()) {
+                Some(prefix) => (prefix.to_ascii_lowercase(), "prefix"),
+                None => (asset.value.trim().to_ascii_lowercase(), "exact"),
+            },
+            _ => (asset.value.trim().to_ascii_lowercase(), "exact"),
+        };
+        let key = format!("{}|{pattern}", asset.kind);
+        let slot = *index.entry(key.clone()).or_insert_with(|| {
+            groups.push(UnknownGroup {
+                key,
+                kind: asset.kind.clone(),
+                pattern: display_pattern(&pattern, &asset.value),
+                match_type: match_type.into(),
+                assets: Vec::new(),
+            });
+            groups.len() - 1
+        });
+        groups[slot].assets.push(asset.clone());
+    }
+    // Biggest wins first; ties broken by pattern so the order is stable.
+    groups.sort_by(|a, b| {
+        b.assets
+            .len()
+            .cmp(&a.assets.len())
+            .then_with(|| a.pattern.to_ascii_lowercase().cmp(&b.pattern.to_ascii_lowercase()))
+    });
+    for g in &mut groups {
+        g.assets
+            .sort_by(|a, b| a.value.to_ascii_lowercase().cmp(&b.value.to_ascii_lowercase()));
+    }
+    groups
+}
+
 #[derive(Debug, Serialize)]
 pub struct CollectionReport {
     pub total_presets: usize,
     pub parse_failures: usize,
     pub identified: Vec<IdentifiedGroup>,
     pub unknown: Vec<AssetRef>,
+    /// `unknown`, collapsed into the library entries that would cover it.
+    pub unknown_groups: Vec<UnknownGroup>,
     pub vanilla: Vec<String>,
     /// "kind|lowercased value" → number of presets referencing it.
     pub preset_counts: HashMap<String, usize>,
@@ -1169,6 +1306,7 @@ fn assemble(
         total_presets: collected.total_presets,
         parse_failures: collected.parse_failures,
         identified: output.identified,
+        unknown_groups: group_unknown(&output.unknown),
         unknown: output.unknown,
         vanilla,
         preset_counts: collected.preset_counts.clone(),
@@ -1760,5 +1898,134 @@ mod tests {
             textures.iter().any(|t| t.contains(r"\overlays\")),
             "overlay textures were swallowed by the vanilla rule"
         );
+    }
+
+    fn unknown_ref(kind: &str, value: &str) -> AssetRef {
+        AssetRef {
+            kind: kind.into(),
+            value: value.into(),
+            appeared_in: vec!["test".into()],
+        }
+    }
+
+    #[test]
+    fn unknown_groups_collapse_to_one_entry_per_mod() {
+        let groups = group_unknown(&[
+            // One overlay mod's folder — three rows, one entry.
+            unknown_ref("texture", r"Actors\Character\Overlays\Koralina_Male\a.dds"),
+            unknown_ref("texture", r"Actors\Character\Overlays\Koralina_Male\b.dds"),
+            unknown_ref("texture", r"Actors\Character\Overlays\Koralina_Male\deep\c.dds"),
+            // Same mod, spelled with the Data\Textures\ prefix. Must not
+            // become a second group.
+            unknown_ref(
+                "texture",
+                r"Data\Textures\Actors\Character\PubicHairStyles\a.dds",
+            ),
+            unknown_ref("texture", r"Actors\Character\PubicHairStyles\b.dds"),
+            // Loose files in a generic folder: only the filename prefix
+            // identifies them.
+            unknown_ref("texture", r"Actors\empyreancs_f_10_a.dds"),
+            unknown_ref("texture", r"Actors\empyreancs_f_11_b.dds"),
+            // Morph families carry their prefix the way the seed entries do.
+            unknown_ref("morph", "EXPR_BrowWidth"),
+            unknown_ref("morph", "EXPR_NoseLength"),
+            // Plugins have no shared structure — one each.
+            unknown_ref("plugin", "SomeHair.esp"),
+        ]);
+
+        let by_pattern = |p: &str| {
+            groups
+                .iter()
+                .find(|g| g.pattern.eq_ignore_ascii_case(p))
+                .unwrap_or_else(|| panic!("no group for {p}; got {:?}", patterns(&groups)))
+        };
+
+        let koralina = by_pattern(r"Actors\Character\Overlays\Koralina_Male\");
+        assert_eq!(koralina.assets.len(), 3, "subfolders belong to their mod");
+        assert_eq!(koralina.match_type, "prefix");
+        // Capitalization is taken from the preset, not the lowercased key.
+        assert_eq!(
+            koralina.pattern,
+            r"Actors\Character\Overlays\Koralina_Male\"
+        );
+
+        let pubic = by_pattern(r"Actors\Character\PubicHairStyles\");
+        assert_eq!(
+            pubic.assets.len(),
+            2,
+            "Data\\Textures\\ is a spelling, not a different mod"
+        );
+
+        let empyrean = by_pattern(r"Actors\empyreancs_");
+        assert_eq!(empyrean.assets.len(), 2);
+        assert_eq!(empyrean.match_type, "prefix");
+
+        assert_eq!(by_pattern("EXPR_").assets.len(), 2);
+
+        let plugin = by_pattern("somehair.esp");
+        assert_eq!(plugin.match_type, "exact");
+        assert_eq!(plugin.kind, "plugin");
+
+        assert_eq!(groups.len(), 5, "got {:?}", patterns(&groups));
+        // Keys must be unique — the UI uses them for a keyed list.
+        let keys: std::collections::HashSet<&str> =
+            groups.iter().map(|g| g.key.as_str()).collect();
+        assert_eq!(keys.len(), groups.len());
+        // Biggest group first.
+        assert!(groups[0].assets.len() >= groups[groups.len() - 1].assets.len());
+    }
+
+    fn patterns(groups: &[UnknownGroup]) -> Vec<&str> {
+        groups.iter().map(|g| g.pattern.as_str()).collect()
+    }
+
+    #[test]
+    fn unnamed_texture_with_no_handle_stays_its_own_exact_group() {
+        // No mod folder, no usable filename prefix — nothing to generalize,
+        // so it must not silently join a broader group.
+        let groups = group_unknown(&[unknown_ref("texture", r"Actors\thing.dds")]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].match_type, "exact");
+        assert_eq!(groups[0].assets.len(), 1);
+    }
+
+    /// The collapse ratio, measured on the real collection — a grouping rule
+    /// that quietly stopped grouping would still pass the cases above.
+    #[test]
+    fn unknown_grouping_collapses_the_real_corpus() {
+        let corpus = std::path::Path::new(r"D:\Nordic Souls\mods");
+        if !corpus.is_dir() {
+            return;
+        }
+        let mut refs: HashMap<String, AssetRef> = HashMap::new();
+        for entry in walkdir::WalkDir::new(corpus).into_iter().flatten() {
+            let is_jslot = entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .map(|e| e.eq_ignore_ascii_case("jslot"))
+                    .unwrap_or(false);
+            if !is_jslot {
+                continue;
+            }
+            let Ok(preset) = jslot::parse_file(entry.path()) else {
+                continue;
+            };
+            for t in extract(&preset).textures {
+                refs.entry(t.value.to_ascii_lowercase()).or_insert(t);
+            }
+        }
+        let assets: Vec<AssetRef> = refs.into_values().collect();
+        assert!(assets.len() > 500, "expected a real corpus");
+        let groups = group_unknown(&assets);
+        assert!(
+            groups.len() * 5 < assets.len(),
+            "expected at least a 5x collapse, got {} groups for {} paths",
+            groups.len(),
+            assets.len()
+        );
+        // Every asset lands in exactly one group.
+        let grouped: usize = groups.iter().map(|g| g.assets.len()).sum();
+        assert_eq!(grouped, assets.len());
     }
 }
