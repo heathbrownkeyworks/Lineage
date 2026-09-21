@@ -7,10 +7,14 @@ A RaceMenu `.jslot` preset utility by **ColdSun Creative**.
   know exactly what to download to make a preset work.
 - **Backup** — one action that archives every JSLOT file across your setup
   into a dated zip, folder structure preserved.
-- **Remove BodySlide** — strip the body morph data preset authors leave in
-  their JSLOTs, so a preset applies the face without overwriting your body.
-- **Batch Remove** — the same cleanup across your whole collection, with
+- **Clean Preset** — strip what a preset author's own setup left in a JSLOT
+  (BodySlide sliders, body tattoos, skeleton and height scaling, weapon and
+  camera placement), so a preset applies the face without overwriting your
+  character. Face overlays are never touched.
+- **Batch Clean** — the same cleanup across your whole collection, with
   per-file selection, automatic pre-change snapshots, and one-click restore.
+- **Restore** — compare any backup with what's on disk and put back what
+  changed; a launch nudge when presets aren't covered by your last backup.
 - **Asset Library** — an editable list of preset-reference-to-mod mappings
   (plugins, textures, morph name prefixes) that Find Assets and Collection
   Review fall back on when Nexus can't resolve a reference. Ships with a

@@ -8,8 +8,8 @@
   const items = [
     { href: "/find", label: "Find Assets", Icon: Search },
     { href: "/backup", label: "Backup", Icon: Archive },
-    { href: "/remove", label: "Remove BodySlide", Icon: Eraser },
-    { href: "/batch", label: "Batch Remove", Icon: Layers },
+    { href: "/remove", label: "Clean Preset", Icon: Eraser },
+    { href: "/batch", label: "Batch Clean", Icon: Layers },
     { href: "/library", label: "Asset Library", Icon: BookMarked },
   ];
 

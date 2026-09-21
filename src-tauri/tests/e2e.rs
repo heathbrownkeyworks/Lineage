@@ -122,7 +122,7 @@ fn real_backup_roundtrips_bytes() {
 /// The destructive path end-to-end on COPIES of real presets: snapshot →
 /// remove → verify only the section changed → restore → byte-identical.
 #[test]
-fn snapshot_remove_restore_on_real_preset_copies() {
+fn snapshot_clean_restore_on_real_preset_copies() {
     let tmp = sandbox("remove");
     let corpus =
         Path::new(r"D:\Nordic Souls\mods\ColdSun's Face Presets\SKSE\Plugins\CharGen\Presets");
@@ -130,6 +130,8 @@ fn snapshot_remove_restore_on_real_preset_copies() {
         return;
     }
     // Copy a handful of real presets that carry bodyMorphs into the sandbox.
+    use lineage_lib::clean::CleanCategory::*;
+    let defaults = [BodyMorphs, BodyOverlays, Skeleton, WeaponCamera];
     let work = tmp.join("mod").join("SKSE").join("Plugins").join("CharGen").join("Presets");
     std::fs::create_dir_all(&work).unwrap();
     let mut copies: Vec<PathBuf> = Vec::new();
@@ -145,8 +147,10 @@ fn snapshot_remove_restore_on_real_preset_copies() {
         if !is_jslot {
             continue;
         }
-        let inspection = lineage_lib::jslot::inspect_path(&path);
-        if inspection.parse_error.is_none() && inspection.section.is_some() {
+        let inspection = lineage_lib::clean::inspect(&path, false);
+        if inspection.parse_error.is_none()
+            && inspection.findings.iter().any(|f| f.category == BodyMorphs)
+        {
             let dest = work.join(path.file_name().unwrap());
             std::fs::copy(&path, &dest).unwrap();
             copies.push(dest);
@@ -170,14 +174,15 @@ fn snapshot_remove_restore_on_real_preset_copies() {
     let originals: Vec<Vec<u8>> = copies.iter().map(|p| std::fs::read(p).unwrap()).collect();
 
     // Snapshot first — the invariant every destructive op relies on.
-    let meta = snapshot::write_snapshot(&settings, "remove-batch", &copies).expect("snapshot");
+    let meta = snapshot::write_snapshot(&settings, "clean-batch", &copies).expect("snapshot");
     assert_eq!(meta.entries.len(), copies.len());
 
-    // Remove.
+    // Clean with the defaults.
     for path in &copies {
-        let detail = lineage_lib::jslot::remove_body_morphs_in_place(path).expect("removal");
-        assert_eq!(detail.removed_section, "bodyMorphs");
-        assert!(detail.removed_count > 0);
+        let detail = lineage_lib::clean::clean_in_place(path, &defaults)
+            .expect("clean")
+            .expect("each copy carries body morphs");
+        assert!(detail.removed.iter().all(|f| f.count > 0));
         let after = std::fs::read_to_string(path).unwrap();
         assert!(!after.contains("\"bodyMorphs\""));
     }
@@ -194,7 +199,7 @@ fn snapshot_remove_restore_on_real_preset_copies() {
         .collect();
     assert!(stray.is_empty(), "stray files in mod folder: {stray:?}");
 
-    // Restore — byte-identical to the pre-removal originals.
+    // Restore — byte-identical to the pre-clean originals.
     let report = snapshot::restore_snapshot_in(&settings, &meta.id).expect("restore");
     assert_eq!(report.restored.len(), copies.len());
     assert!(report.failed.is_empty());

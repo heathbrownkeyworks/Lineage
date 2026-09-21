@@ -2,6 +2,7 @@
 // the commands use.
 pub mod assets;
 pub mod backup;
+pub mod clean;
 pub mod detect;
 pub mod jslot;
 pub mod library;
@@ -89,9 +90,9 @@ pub fn run() {
             snapshot::snapshot_stats,
             snapshot::clear_snapshots,
             ops::inspect_preset,
-            ops::remove_body_morphs,
+            ops::clean_preset,
             ops::batch_scan,
-            ops::batch_remove,
+            ops::batch_clean,
             nexus::validate_nexus_key,
             nexus::get_rate_limit,
             assets::find_assets,

@@ -30,6 +30,13 @@ impl Raw {
         members.iter().find(|(k, _)| *k == quoted).map(|(_, v)| v)
     }
 
+    /// Mutable access to an object member by key name.
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Raw> {
+        let Raw::Object(members) = self else { return None };
+        let quoted = format!("\"{key}\"");
+        members.iter_mut().find(|(k, _)| *k == quoted).map(|(_, v)| v)
+    }
+
     /// Remove an object member by key name; true when something was removed.
     pub fn remove(&mut self, key: &str) -> bool {
         let Raw::Object(members) = self else { return false };

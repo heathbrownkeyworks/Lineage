@@ -74,12 +74,26 @@ only in some):
 (`{node, values: [{data, index, key, type}]}`), `tintInfo` (`{color, index,
 texture}`), `transforms`, `version` (`{signature, skseVersion, …}`).
 
-- **`bodyMorphs`** is the section Remove BodySlide strips:
+- **`bodyMorphs`** is one of the things Clean Preset strips:
   `[{keys: [{key: "XPMSE.esp", value: n}], name: "MorphName"}]`. It includes
   BodySlide sliders *and* XPMSE skeleton morphs — both are body morph data
   RaceMenu re-applies on preset load. The candidate-key list is the
   `BODY_MORPH_KEYS` constant in [jslot.rs](src-tauri/src/jslot.rs); only
   `bodyMorphs` is confirmed in the wild so far.
+- **Clean Preset works per node, not per section** ([clean.rs](src-tauri/src/clean.rs)).
+  `overrides` holds body tattoos *and* face makeup, and `transforms` holds
+  height *and* head scale, so the entry's `node` name decides what goes.
+  Across the 1,840-preset collection: real body/hands/feet overlays in 223 /
+  67 / 61 presets, real face overlays in 108; 244 distinct transform nodes.
+  Categories (defaults agreed with Heath, 2026-09-20): body morphs, body
+  overlays (`Body`/`Hands`/`Feet [OvlN]`), height & skeleton (every
+  transform node not otherwise claimed — root, spine, limbs, fingers, butt,
+  breasts, genitals, tail), weapon & camera (any node naming a weapon,
+  shield, quiver, bolt or camera, `HDT`/`CME` variants included) — all on by
+  default; head & neck (`NPC Head`, `Head MagicNode`, neck) offered but off.
+  **Face overlays are not a category** — no checkbox can strip a face, so no
+  batch run can. A section emptied by a clean is dropped (RaceMenu writes a
+  preset without one that way); one the author left empty is not touched.
 
 ### Formatting dialects (matters for byte preservation)
 

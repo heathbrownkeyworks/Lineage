@@ -197,28 +197,37 @@ export type SnapshotStats = {
   retention: number;
 };
 
-/** What one preset looks like to the Remove BodySlide features. */
+/** What Clean Preset can remove. Face overlays are deliberately not one of
+ *  these — they're the preset's look and are never touched. */
+export type CleanCategory = "body_morphs" | "body_overlays" | "skeleton" | "weapon_camera" | "head_neck";
+
+/** What one category holds in a preset. */
+export type Finding = {
+  category: CleanCategory;
+  count: number;
+  /** Morph names for body morphs, node names otherwise, in file order. */
+  items: string[];
+  /** The removed entries exactly as the file writes them — single-file
+   *  inspection only; null from batch scans. */
+  preview: string | null;
+};
+
+/** What one preset looks like to Clean Preset. */
 export type PresetInspection = {
   path: string;
   file_name: string;
-  section: string | null;
-  morph_count: number;
-  morph_names: string[];
-  /** The section's JSON exactly as it appears in the file (single-file
-   *  inspection only; null from batch scans). */
-  section_json: string | null;
+  findings: Finding[];
   parse_error: string | null;
   roundtrip_faithful: boolean;
 };
 
-export type RemovalDetail = {
+export type CleanDetail = {
   path: string;
-  removed_section: string;
-  removed_count: number;
+  removed: Finding[];
 };
 
-export type SingleRemoveOutcome = {
-  detail: RemovalDetail;
+export type SingleCleanOutcome = {
+  detail: CleanDetail;
   snapshot_id: string;
 };
 
@@ -227,13 +236,14 @@ export type BatchItem = {
   file_name: string;
   rel_path: string;
   root_label: string;
-  morph_count: number;
+  /** Entries per category, for filtering by the chosen ones without a rescan. */
+  counts: Partial<Record<CleanCategory, number>>;
 };
 
 export type BatchScanReport = {
   total: number;
-  with_section: BatchItem[];
-  without_section: number;
+  candidates: BatchItem[];
+  nothing_to_clean: number;
   failed: FailedFile[];
 };
 
@@ -241,12 +251,12 @@ export type BatchProgress = {
   current: number;
   total: number;
   name: string;
-  stage: "scanning" | "removing";
+  stage: "scanning" | "cleaning";
 };
 
-export type BatchRemoveReport = {
+export type BatchCleanReport = {
   snapshot_id: string;
-  modified: RemovalDetail[];
+  cleaned: CleanDetail[];
   skipped: string[];
   failed: FailedFile[];
 };

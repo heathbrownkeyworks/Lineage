@@ -57,6 +57,10 @@
         return "Removed BodySlide (single preset)";
       case "remove-batch":
         return "Removed BodySlide (batch)";
+      case "clean-single":
+        return "Cleaned preset";
+      case "clean-batch":
+        return "Cleaned presets (batch)";
       case "restore-backup":
         return "Restored from backup";
       default:

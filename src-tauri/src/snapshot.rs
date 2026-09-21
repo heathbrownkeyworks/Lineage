@@ -26,7 +26,8 @@ pub struct SnapshotEntry {
 pub struct SnapshotMeta {
     /// Archive file stem, e.g. `SNAPSHOT-08242026-153000`. Doubles as the id.
     pub id: String,
-    /// "remove-single" | "remove-batch"
+    /// "clean-single" | "clean-batch" | "restore-backup" — and the older
+    /// "remove-single" | "remove-batch", which still appear in History.
     pub operation: String,
     /// Unix seconds.
     pub created_at: i64,

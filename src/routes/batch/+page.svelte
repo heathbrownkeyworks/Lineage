@@ -4,28 +4,30 @@
   import PageHeader from "$lib/components/PageHeader.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import HistoryDialog from "$lib/components/HistoryDialog.svelte";
-  import {
-    batchScan,
-    batchRemove,
-    getBackupStatus,
-    formatWhen,
-  } from "$lib/tauri";
+  import CategoryPicker from "$lib/components/CategoryPicker.svelte";
+  import { batchScan, batchClean, getBackupStatus, formatWhen } from "$lib/tauri";
   import { appEvents, bumpPresets } from "$lib/stores/app.svelte";
+  import { DEFAULT_CATEGORIES, categoryLabel, describeCounts } from "$lib/clean";
   import type {
     BackupStatus,
+    BatchCleanReport,
+    BatchItem,
     BatchProgress,
-    BatchRemoveReport,
     BatchScanReport,
+    CleanCategory,
   } from "$lib/types";
 
   let backup = $state<BackupStatus | null>(null);
   let scanReport = $state<BatchScanReport | null>(null);
   let scanning = $state(false);
   let progress = $state<BatchProgress | null>(null);
+  let chosen = $state<CleanCategory[]>([...DEFAULT_CATEGORIES]);
+  /** Every candidate starts selected; the chosen categories decide which are
+   *  visible, so changing them never loses the user's own deselections. */
   let selected = $state<Set<string>>(new Set());
   let confirming = $state(false);
   let running = $state(false);
-  let result = $state<BatchRemoveReport | null>(null);
+  let result = $state<BatchCleanReport | null>(null);
   let error = $state<string | null>(null);
   let failuresOpen = $state(false);
   let historyOpen = $state(false);
@@ -33,6 +35,28 @@
   const backupOk = $derived(
     backup !== null && backup.last_backup_at !== null && backup.last_backup_exists,
   );
+
+  const chosenCount = (item: BatchItem) => chosen.reduce((n, c) => n + (item.counts[c] ?? 0), 0);
+  /** Candidates holding anything in the chosen categories. */
+  const visible = $derived((scanReport?.candidates ?? []).filter((i) => chosenCount(i) > 0));
+  const selectedVisible = $derived(visible.filter((i) => selected.has(i.path)));
+  /** Presets holding each category — the counts beside the picker. */
+  const presetsWith = $derived.by(() => {
+    const t: Partial<Record<CleanCategory, number>> = {};
+    for (const item of scanReport?.candidates ?? []) {
+      for (const c of Object.keys(item.counts) as CleanCategory[]) {
+        if ((item.counts[c] ?? 0) > 0) t[c] = (t[c] ?? 0) + 1;
+      }
+    }
+    return t;
+  });
+  const removedTotals = $derived.by(() => {
+    const t: Partial<Record<CleanCategory, number>> = {};
+    for (const d of result?.cleaned ?? []) {
+      for (const f of d.removed) t[f.category] = (t[f.category] ?? 0) + f.count;
+    }
+    return t;
+  });
 
   // Initial load + refresh whenever settings are saved anywhere.
   $effect(() => {
@@ -50,7 +74,7 @@
     progress = null;
     try {
       scanReport = await batchScan((p) => (progress = p));
-      selected = new Set(scanReport.with_section.map((f) => f.path));
+      selected = new Set(scanReport.candidates.map((f) => f.path));
     } catch (e) {
       error = typeof e === "string" ? e : String(e);
     } finally {
@@ -67,11 +91,13 @@
   }
 
   function toggleAll() {
-    if (!scanReport) return;
-    selected =
-      selected.size === scanReport.with_section.length
-        ? new Set()
-        : new Set(scanReport.with_section.map((f) => f.path));
+    const allOn = selectedVisible.length === visible.length;
+    const next = new Set(selected);
+    for (const item of visible) {
+      if (allOn) next.delete(item.path);
+      else next.add(item.path);
+    }
+    selected = next;
   }
 
   async function confirmRun() {
@@ -80,7 +106,11 @@
     error = null;
     progress = null;
     try {
-      result = await batchRemove([...selected], (p) => (progress = p));
+      result = await batchClean(
+        selectedVisible.map((i) => i.path),
+        chosen,
+        (p) => (progress = p),
+      );
       bumpPresets();
       scanReport = null;
       selected = new Set();
@@ -94,8 +124,8 @@
 </script>
 
 <PageHeader
-  title="Batch Remove"
-  subtitle="Strip BodySlide data out of your whole preset collection in one pass. Every file is snapshotted before it's touched, and you choose exactly which files are included."
+  title="Batch Clean"
+  subtitle="Clean your whole preset collection in one pass. Every file is snapshotted before it's touched, and you choose exactly which files are included and what gets removed."
 />
 
 <div class="content">
@@ -124,11 +154,11 @@
     {#if !scanReport && !result && !scanning}
       <div class="sf-card pad start">
         <p class="explain">
-          Backed up {formatWhen(backup.last_backup_at ?? 0)}. Scan your locations to see which
-          presets carry body morph data.
+          Backed up {formatWhen(backup.last_backup_at ?? 0)}. Scan your locations to see what the
+          authors' setups left in each preset.
         </p>
         <button type="button" class="btn btn-primary" onclick={scan}>
-          <ScanSearch size={14} /> Scan for body morphs
+          <ScanSearch size={14} /> Scan presets
         </button>
       </div>
     {/if}
@@ -136,7 +166,7 @@
     {#if scanning || running}
       <div class="sf-card pad">
         <p class="stage">
-          {progress?.stage === "removing" ? "Removing body morphs…" : "Scanning presets…"}
+          {progress?.stage === "cleaning" ? "Cleaning presets…" : "Scanning presets…"}
         </p>
         <ProgressBar
           current={progress?.current ?? 0}
@@ -154,12 +184,12 @@
             <span class="stat-label">presets found</span>
           </div>
           <div class="stat">
-            <span class="big mono accent">{scanReport.with_section.length}</span>
-            <span class="stat-label">with body morphs</span>
+            <span class="big mono accent">{visible.length}</span>
+            <span class="stat-label">to clean</span>
           </div>
           <div class="stat">
-            <span class="big mono">{scanReport.without_section}</span>
-            <span class="stat-label">already clean</span>
+            <span class="big mono">{scanReport.total - scanReport.failed.length - visible.length}</span>
+            <span class="stat-label">nothing to clean</span>
           </div>
           <div class="stat">
             <span class="big mono" class:warn={scanReport.failed.length > 0}>{scanReport.failed.length}</span>
@@ -178,9 +208,17 @@
         {/if}
       </div>
 
-      {#if scanReport.with_section.length === 0}
+      <div class="sf-card pad">
+        <CategoryPicker bind:chosen counts={presetsWith} />
+      </div>
+
+      {#if visible.length === 0}
         <div class="note note-info">
-          Every preset in your collection is already clean — no body morph data anywhere.
+          {#if chosen.length === 0}
+            Pick at least one thing to remove.
+          {:else}
+            Nothing in the chosen categories anywhere in your collection — it's already clean.
+          {/if}
         </div>
       {:else}
         <section class="sf-card list-card">
@@ -188,23 +226,23 @@
             <label class="check-all">
               <input
                 type="checkbox"
-                checked={selected.size === scanReport.with_section.length}
-                indeterminate={selected.size > 0 && selected.size < scanReport.with_section.length}
+                checked={selectedVisible.length === visible.length}
+                indeterminate={selectedVisible.length > 0 && selectedVisible.length < visible.length}
                 onchange={toggleAll}
               />
-              <span>{selected.size} of {scanReport.with_section.length} selected</span>
+              <span>{selectedVisible.length} of {visible.length} selected</span>
             </label>
             <button
               type="button"
               class="btn btn-danger"
-              disabled={selected.size === 0}
+              disabled={selectedVisible.length === 0}
               onclick={() => (confirming = true)}
             >
-              <Layers size={14} /> Remove from {selected.size} preset{selected.size === 1 ? "" : "s"}…
+              <Layers size={14} /> Clean {selectedVisible.length} preset{selectedVisible.length === 1 ? "" : "s"}…
             </button>
           </div>
           <ul class="file-list">
-            {#each scanReport.with_section as item (item.path)}
+            {#each visible as item (item.path)}
               <li>
                 <label class="file-row">
                   <input
@@ -214,7 +252,7 @@
                   />
                   <span class="fname">{item.file_name}</span>
                   <span class="fmeta mono">{item.root_label} · {item.rel_path}</span>
-                  <span class="count mono">{item.morph_count} morphs</span>
+                  <span class="count mono">{describeCounts(item.counts, chosen)}</span>
                 </label>
               </li>
             {/each}
@@ -228,8 +266,8 @@
         <h2 class="sf-label">Batch complete</h2>
         <div class="tally-grid">
           <div class="stat">
-            <span class="big mono ok">{result.modified.length}</span>
-            <span class="stat-label">modified</span>
+            <span class="big mono ok">{result.cleaned.length}</span>
+            <span class="stat-label">cleaned</span>
           </div>
           <div class="stat">
             <span class="big mono">{result.skipped.length}</span>
@@ -240,6 +278,9 @@
             <span class="stat-label">failed</span>
           </div>
         </div>
+        {#if result.cleaned.length > 0}
+          <p class="removed-line">Removed {describeCounts(removedTotals)}.</p>
+        {/if}
         {#if result.failed.length > 0}
           <button type="button" class="expander" onclick={() => (failuresOpen = !failuresOpen)}>
             <ChevronDown size={13} class={failuresOpen ? "flip" : ""} />
@@ -268,20 +309,23 @@
   {/if}
 </div>
 
-<!-- Confirmation: a real count and the backup date being relied on. -->
+<!-- Confirmation: a real count, what goes, and the backup being relied on. -->
 {#if confirming && scanReport}
   <div class="confirm-scrim" role="presentation">
-    <div class="confirm sf-card" role="alertdialog" aria-modal="true" aria-label="Confirm batch removal">
-      <h2 class="sf-display">Remove body morphs from {selected.size} preset{selected.size === 1 ? "" : "s"}?</h2>
+    <div class="confirm sf-card" role="alertdialog" aria-modal="true" aria-label="Confirm batch clean">
+      <h2 class="sf-display">
+        Clean {selectedVisible.length} preset{selectedVisible.length === 1 ? "" : "s"}?
+      </h2>
       <p>
-        Each file's body morph section will be removed in place. You're covered by the full
-        backup from <strong>{formatWhen(backup?.last_backup_at ?? 0)}</strong> and by an
-        operation snapshot taken right before anything changes.
+        Removes {chosen.map((c) => categoryLabel(c).toLowerCase()).join(", ")} from each, in place.
+        Face overlays are never touched. You're covered by the full backup from
+        <strong>{formatWhen(backup?.last_backup_at ?? 0)}</strong> and by an operation snapshot taken
+        right before anything changes.
       </p>
       <div class="confirm-actions">
         <button type="button" class="btn btn-ghost" onclick={() => (confirming = false)}>Cancel</button>
         <button type="button" class="btn btn-danger" onclick={confirmRun}>
-          Remove from {selected.size} preset{selected.size === 1 ? "" : "s"}
+          Clean {selectedVisible.length} preset{selectedVisible.length === 1 ? "" : "s"}
         </button>
       </div>
     </div>
@@ -470,6 +514,11 @@
   }
   :global(.flip) {
     transform: rotate(180deg);
+  }
+  .removed-line {
+    margin: 12px 0 0;
+    font-size: 12.5px;
+    color: var(--sf-text-2);
   }
   .undo-line {
     margin: 14px 0 0;

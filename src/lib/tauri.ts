@@ -11,9 +11,10 @@ import type {
   BackupProgress,
   BackupRestoreOutcome,
   BackupStatus,
+  BatchCleanReport,
   BatchProgress,
-  BatchRemoveReport,
   BatchScanReport,
+  CleanCategory,
   CollectionReport,
   DetectedEnvironment,
   FindAssetsReport,
@@ -29,7 +30,7 @@ import type {
   RestoreReport,
   ScanResult,
   Settings,
-  SingleRemoveOutcome,
+  SingleCleanOutcome,
   SnapshotInfo,
   SnapshotStats,
 } from "./types";
@@ -128,14 +129,17 @@ export async function clearSnapshots(): Promise<void> {
   await invoke("clear_snapshots");
 }
 
-// ---- remove bodyslide -----------------------------------------------------
+// ---- clean preset ---------------------------------------------------------
 
 export async function inspectPreset(path: string): Promise<PresetInspection> {
   return await invoke<PresetInspection>("inspect_preset", { path });
 }
 
-export async function removeBodyMorphs(path: string): Promise<SingleRemoveOutcome> {
-  return await invoke<SingleRemoveOutcome>("remove_body_morphs", { path });
+export async function cleanPreset(
+  path: string,
+  categories: CleanCategory[],
+): Promise<SingleCleanOutcome> {
+  return await invoke<SingleCleanOutcome>("clean_preset", { path, categories });
 }
 
 export async function batchScan(
@@ -146,13 +150,14 @@ export async function batchScan(
   return await invoke<BatchScanReport>("batch_scan", { onProgress: channel });
 }
 
-export async function batchRemove(
+export async function batchClean(
   paths: string[],
+  categories: CleanCategory[],
   onProgress?: (p: BatchProgress) => void,
-): Promise<BatchRemoveReport> {
+): Promise<BatchCleanReport> {
   const channel = new Channel<BatchProgress>();
   if (onProgress) channel.onmessage = onProgress;
-  return await invoke<BatchRemoveReport>("batch_remove", { paths, onProgress: channel });
+  return await invoke<BatchCleanReport>("batch_clean", { paths, categories, onProgress: channel });
 }
 
 // ---- nexus ----------------------------------------------------------------

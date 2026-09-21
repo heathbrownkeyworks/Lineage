@@ -15,11 +15,10 @@
 //! its verbatim source token (serde_json normalizes `-0`, `1e5`, and string
 //! escapes even with `arbitrary_precision`). Writing detects each file's
 //! dialect and reproduces it, so a parse → serialize round trip reproduces
-//! the original bytes. `inspect` verifies that per file and reports it
+//! the original bytes. `clean::inspect` verifies that per file and reports it
 //! honestly instead of assuming.
 
-use crate::rawjson::{self, Raw};
-use serde::Serialize;
+use crate::rawjson::Raw;
 use serde_json::Value;
 use std::path::Path;
 
@@ -39,7 +38,7 @@ const INDENT: &str = "   ";
 // ---------------------------------------------------------------------------
 
 /// Strip an optional UTF-8 BOM and return (had_bom, text).
-fn read_text(bytes: &[u8]) -> (bool, String) {
+pub(crate) fn read_text(bytes: &[u8]) -> (bool, String) {
     match bytes.strip_prefix(b"\xef\xbb\xbf") {
         Some(rest) => (true, String::from_utf8_lossy(rest).into_owned()),
         None => (false, String::from_utf8_lossy(bytes).into_owned()),
@@ -452,136 +451,10 @@ fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::rename(from, to)
 }
 
-// ---------------------------------------------------------------------------
-// Inspection + removal primitives (commands live in ops.rs)
-// ---------------------------------------------------------------------------
-
-/// What one preset looks like to the Remove BodySlide features.
-#[derive(Debug, Serialize)]
-pub struct PresetInspection {
-    pub path: String,
-    pub file_name: String,
-    /// Which body-morph section is present, if any.
-    pub section: Option<String>,
-    pub morph_count: usize,
-    pub morph_names: Vec<String>,
-    /// The section's JSON exactly as it appears in the file — only filled by
-    /// the single-file inspect (batch scans thousands of files and doesn't
-    /// need the text).
-    pub section_json: Option<String>,
-    /// Set when the file couldn't be parsed; everything else is then empty.
-    pub parse_error: Option<String>,
-    /// True when a parse → serialize round trip reproduces the file exactly,
-    /// so the removal write will only change the removed section.
-    pub roundtrip_faithful: bool,
-}
-
-/// Inspection without the section text — what batch scans use.
-pub fn inspect_path(path: &Path) -> PresetInspection {
-    inspect_path_impl(path, false)
-}
-
-/// Inspection including the section's verbatim JSON, for the single-file
-/// Remove screen's preview.
-pub fn inspect_path_full(path: &Path) -> PresetInspection {
-    inspect_path_impl(path, true)
-}
-
-fn inspect_path_impl(path: &Path, include_preview: bool) -> PresetInspection {
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let base = PresetInspection {
-        path: path.display().to_string(),
-        file_name,
-        section: None,
-        morph_count: 0,
-        morph_names: Vec::new(),
-        section_json: None,
-        parse_error: None,
-        roundtrip_faithful: false,
-    };
-    let original = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            return PresetInspection {
-                parse_error: Some(format!("Couldn't read the file: {e}")),
-                ..base
-            }
-        }
-    };
-    let (bom, text) = read_text(&original);
-    // serde_json is the validator of record — its errors are clearer.
-    if let Err(e) = serde_json::from_str::<Value>(&text) {
-        return PresetInspection {
-            parse_error: Some(format!("Not valid preset JSON ({e})")),
-            ..base
-        };
-    }
-    let raw = match rawjson::parse(&text) {
-        Ok(raw) => raw,
-        Err(e) => {
-            return PresetInspection {
-                parse_error: Some(format!("Not valid preset JSON ({e})")),
-                ..base
-            }
-        }
-    };
-    let names = body_morph_names(&raw);
-    let section = body_morph_key(&raw);
-    let section_json = if include_preview {
-        section.and_then(|key| section_preview(&raw, key, detect_format(&text, bom)))
-    } else {
-        None
-    };
-    PresetInspection {
-        section: section.map(str::to_string),
-        morph_count: names.len(),
-        morph_names: names,
-        section_json,
-        roundtrip_faithful: roundtrip_faithful(&original, &raw),
-        ..base
-    }
-}
-
-/// Remove the body-morph section from a preset and write it back atomically,
-/// in the file's own formatting dialect. The caller is responsible for
-/// snapshotting first.
-pub fn remove_body_morphs_in_place(path: &Path) -> Result<RemovalDetail, String> {
-    let bytes =
-        std::fs::read(path).map_err(|e| format!("Couldn't read {}: {e}", path.display()))?;
-    let (bom, text) = read_text(&bytes);
-    // Validate with serde_json first for a clear error message.
-    serde_json::from_str::<Value>(&text).map_err(|e| format!("Not valid preset JSON ({e})"))?;
-    let mut raw = rawjson::parse(&text).map_err(|e| format!("Not valid preset JSON ({e})"))?;
-    let format = detect_format(&text, bom);
-    let Some(key) = body_morph_key(&raw) else {
-        return Err("No body morph data in this preset — nothing to remove.".into());
-    };
-    let removed_count = match raw.get(key) {
-        Some(Raw::Array(items)) => items.len(),
-        _ => 0,
-    };
-    raw.remove(key);
-    write_atomic(path, to_formatted_string(&raw, format).as_bytes())?;
-    Ok(RemovalDetail {
-        path: path.display().to_string(),
-        removed_section: key.to_string(),
-        removed_count,
-    })
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RemovalDetail {
-    pub path: String,
-    pub removed_section: String,
-    pub removed_count: usize,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rawjson;
 
     const SAMPLE: &str = r#"{
    "actor" : {
@@ -679,55 +552,6 @@ mod tests {
 
         // Absent section → no preview.
         assert!(section_preview(&raw, "nope", detect_format(pretty, false)).is_none());
-    }
-
-    #[test]
-    fn full_inspection_carries_the_preview_and_plain_does_not() {
-        let dir = std::env::temp_dir().join(format!("lineage-inspect-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("p.jslot");
-        std::fs::write(&path, SAMPLE).unwrap();
-
-        let full = inspect_path_full(&path);
-        let json = full.section_json.expect("full inspection has the preview");
-        assert!(json.starts_with("\"bodyMorphs\" : ["));
-        assert!(json.contains("XPMSEAABase_2hweqp"));
-        assert!(inspect_path(&path).section_json.is_none(), "batch path stays lean");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn removal_strips_only_the_section() {
-        let dir = std::env::temp_dir().join(format!("lineage-jslot-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("test.jslot");
-        std::fs::write(&path, SAMPLE).unwrap();
-
-        let detail = remove_body_morphs_in_place(&path).unwrap();
-        assert_eq!(detail.removed_section, "bodyMorphs");
-        assert_eq!(detail.removed_count, 1);
-
-        let after = std::fs::read_to_string(&path).unwrap();
-        assert!(!after.contains("bodyMorphs"));
-        // Everything before and after the removed section is untouched.
-        assert!(after.contains("\"hairColor\" : 1118481"));
-        assert!(after.contains("\"value\" : 1.689999938011169"));
-        assert!(after.contains("\"skseVersion\" : 33554736"));
-        // No stray temp files left in the folder.
-        let leftovers: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name() != "test.jslot")
-            .collect();
-        assert!(leftovers.is_empty(), "stray files: {leftovers:?}");
-
-        // A second run reports "nothing to remove".
-        assert!(remove_body_morphs_in_place(&path).is_err());
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The real corpus check: parse → serialize the user's actual presets and
