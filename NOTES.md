@@ -327,10 +327,13 @@ normalized. This is the only unavoidable reformatting case found.
   official masters and `Skyrim.ccc` count as active), the overwrite folder,
   `Data`, and every mod root's plugins and BSAs. Loose textures are found by
   a walk that only descends folders a wanted file sits under, so 1,900+ mod
-  folders take milliseconds. A BSA loads when `Skyrim.ini`
-  (`sResourceArchiveList`/`2`, the profile's own INI under MO2) names it or
-  an active plugin claims it (`X.bsa`, `X - *.bsa`); archives are only read
-  for textures still unfound. [bsa.rs](src-tauri/src/bsa.rs) reads name
+  folders take milliseconds. A BSA loads when an archive list names it
+  (`sResourceArchiveList`/`2` in `Skyrim.ini`/`SkyrimCustom.ini` — the
+  profile's own only with `LocalSettings=true` — plus the base game's
+  defaults) or an active plugin claims it. Skyrim claims only `X.bsa` and
+  `X - Textures.bsa`; `X - *.bsa` is the Fallout 3/NV rule. Archives are only
+  read for textures still unfound. `plugins.txt` and the INIs are ANSI
+  (cp1252), not UTF-8. [bsa.rs](src-tauri/src/bsa.rs) reads name
   tables only (v103–105). Slider families match the library's Nexus id
   against `meta.ini` modids, and since any mod can provide a family, "no
   enabled mod from that page" is Unconfirmed, never Missing. On the real

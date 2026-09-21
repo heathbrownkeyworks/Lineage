@@ -37,6 +37,7 @@ pub fn for_each_path(path: &Path, f: &mut dyn FnMut(&str)) -> Result<(), String>
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let fail = |e: std::io::Error| format!("{name} couldn't be read as an archive ({e})");
     let file = std::fs::File::open(path).map_err(fail)?;
+    let len = file.metadata().map_err(fail)?.len();
     let mut r = BufReader::new(file);
 
     let mut magic = [0u8; 4];
@@ -55,7 +56,11 @@ pub fn for_each_path(path: &Path, f: &mut dyn FnMut(&str)) -> Result<(), String>
     let _folder_names_len = read_u32(&mut r).map_err(fail)?;
     let file_names_len = read_u32(&mut r).map_err(fail)?;
     let _file_flags = read_u32(&mut r).map_err(fail)?;
-    if folder_count > MAX_ENTRIES || file_count > MAX_ENTRIES {
+    // Every table must fit in the file: a damaged header mustn't be able to
+    // ask for gigabytes of memory.
+    let record_size: u64 = if version == 105 { 24 } else { 16 };
+    let tables = u64::from(folder_count) * record_size + u64::from(file_count) * 16 + u64::from(file_names_len);
+    if folder_count > MAX_ENTRIES || file_count > MAX_ENTRIES || tables > len {
         return Err(format!("{name} has a damaged header."));
     }
     if flags & INCLUDE_DIRECTORY_NAMES == 0 || flags & INCLUDE_FILE_NAMES == 0 {
@@ -65,7 +70,6 @@ pub fn for_each_path(path: &Path, f: &mut dyn FnMut(&str)) -> Result<(), String>
     skip(&mut r, u64::from(header_size.saturating_sub(36))).map_err(fail)?;
 
     // Folder records: only the per-folder file counts matter here.
-    let record_size: u64 = if version == 105 { 24 } else { 16 };
     let mut counts = Vec::with_capacity(folder_count as usize);
     for _ in 0..folder_count {
         skip(&mut r, 8).map_err(fail)?; // name hash

@@ -31,6 +31,60 @@ const OFFICIAL_MASTERS: [&str; 5] = [
     "dragonborn.esm",
 ];
 const PLUGIN_EXTENSIONS: [&str; 3] = ["esp", "esm", "esl"];
+/// Skyrim SE's own archive list (Skyrim_Default.ini). The base game loads
+/// these however an INI was edited, and no plugin name claims them.
+const DEFAULT_ARCHIVES: [&str; 18] = [
+    "skyrim - misc.bsa",
+    "skyrim - shaders.bsa",
+    "skyrim - interface.bsa",
+    "skyrim - animations.bsa",
+    "skyrim - meshes0.bsa",
+    "skyrim - meshes1.bsa",
+    "skyrim - sounds.bsa",
+    "skyrim - voices_en0.bsa",
+    "skyrim - textures0.bsa",
+    "skyrim - textures1.bsa",
+    "skyrim - textures2.bsa",
+    "skyrim - textures3.bsa",
+    "skyrim - textures4.bsa",
+    "skyrim - textures5.bsa",
+    "skyrim - textures6.bsa",
+    "skyrim - textures7.bsa",
+    "skyrim - textures8.bsa",
+    "skyrim - patch.bsa",
+];
+
+/// plugins.txt, the INIs and Skyrim.ccc are written in the ANSI code page
+/// (Windows-1252 on Western systems), not UTF-8: one accented plugin name
+/// would make a strict UTF-8 read fail outright.
+fn read_ansi(path: &Path) -> std::io::Result<String> {
+    const HIGH: [char; 32] = [
+        '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž', '\u{8f}',
+        '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9d}', 'ž', 'Ÿ',
+    ];
+    let bytes = std::fs::read(path)?;
+    Ok(match std::str::from_utf8(&bytes) {
+        Ok(text) => text.trim_start_matches('\u{feff}').to_string(),
+        Err(_) => bytes
+            .iter()
+            .map(|&b| match b {
+                0x80..=0x9f => HIGH[usize::from(b - 0x80)],
+                _ => char::from(b),
+            })
+            .collect(),
+    })
+}
+
+/// A directory entry's type, following junctions and symlinks — on Windows
+/// a junctioned mod folder is neither a dir nor a file until followed.
+fn followed_type(entry: &std::fs::DirEntry) -> Option<std::fs::FileType> {
+    let kind = entry.file_type().ok()?;
+    if kind.is_symlink() {
+        std::fs::metadata(entry.path()).ok().map(|m| m.file_type())
+    } else {
+        Some(kind)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -129,9 +183,23 @@ fn ini_archives(text: &str) -> HashSet<String> {
         .collect()
 }
 
-fn my_games_ini() -> Option<PathBuf> {
+fn my_games() -> Option<PathBuf> {
     let home = std::env::var_os("USERPROFILE")?;
-    Some(PathBuf::from(home).join(r"Documents\My Games\Skyrim Special Edition\Skyrim.ini"))
+    Some(PathBuf::from(home).join(r"Documents\My Games\Skyrim Special Edition"))
+}
+
+/// Whether an MO2 profile keeps its own INIs (`LocalSettings=true`);
+/// otherwise the game reads the ones in My Games.
+fn profile_has_local_inis(profile: &Path) -> bool {
+    read_ansi(&profile.join("settings.ini"))
+        .map(|t| {
+            t.lines().any(|l| {
+                l.split_once('=').is_some_and(|(k, v)| {
+                    k.trim().eq_ignore_ascii_case("LocalSettings") && v.trim().eq_ignore_ascii_case("true")
+                })
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn nexus_mod_id(url: &str) -> Option<u32> {
@@ -178,7 +246,7 @@ fn walk(dir: &Path, rel: &str, wanted: &Wanted, hit: &mut dyn FnMut(&str)) {
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_lowercase();
         let child = if rel.is_empty() { name } else { format!("{rel}\\{name}") };
-        let Ok(kind) = entry.file_type() else { continue };
+        let Some(kind) = followed_type(&entry) else { continue };
         if kind.is_dir() {
             if wanted.dirs.contains(&child) {
                 walk(&entry.path(), &child, wanted, hit);
@@ -191,10 +259,15 @@ fn walk(dir: &Path, rel: &str, wanted: &Wanted, hit: &mut dyn FnMut(&str)) {
 
 impl Setup {
     pub fn load(settings: &AppSettings) -> Result<Setup, String> {
-        let data = settings.data_dir().filter(|d| d.is_dir());
+        // The base game's archives and Skyrim.ccc live here; without it every
+        // base-game texture would read as missing.
+        let data = settings
+            .data_dir()
+            .filter(|d| d.is_dir())
+            .ok_or_else(|| "Set your Skyrim folder in Settings first.".to_string())?;
         let mut enabled = Vec::new();
         let mut disabled = Vec::new();
-        let (label, plugins_txt, ini) = match settings.mod_manager {
+        let (label, plugins_txt, ini_dir) = match settings.mod_manager {
             ModManagerKind::Mo2 => {
                 let profile = settings.mo2_profile_dir.trim();
                 if profile.is_empty() {
@@ -206,7 +279,7 @@ impl Setup {
                     .map_err(|e| format!("Couldn't read the MO2 mods folder ({e})."))?;
                 let mut folders: Vec<(String, PathBuf)> = mods
                     .flatten()
-                    .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                    .filter(|e| followed_type(e).is_some_and(|t| t.is_dir()))
                     .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
                     .filter(|(name, _)| !name.to_ascii_lowercase().ends_with("_separator"))
                     .collect();
@@ -227,41 +300,35 @@ impl Setup {
                     });
                 }
                 let profile = Path::new(profile);
-                let profile_ini = profile.join("Skyrim.ini");
                 let label = profile
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| profile.display().to_string());
-                let ini = if profile_ini.is_file() { Some(profile_ini) } else { my_games_ini() };
-                (label, profile.join("plugins.txt"), ini)
+                let ini_dir = if profile_has_local_inis(profile) { Some(profile.to_path_buf()) } else { my_games() };
+                (label, profile.join("plugins.txt"), ini_dir)
             }
             ModManagerKind::Vortex | ModManagerKind::Manual => {
-                if data.is_none() {
-                    return Err("Set your Skyrim folder in Settings first.".to_string());
-                }
                 let local = std::env::var_os("LOCALAPPDATA")
                     .ok_or_else(|| "Couldn't find %LOCALAPPDATA%.".to_string())?;
                 (
                     "your Skyrim Data folder".to_string(),
                     PathBuf::from(local).join(r"Skyrim Special Edition\plugins.txt"),
-                    my_games_ini(),
+                    my_games(),
                 )
             }
         };
-        if let Some(data) = &data {
-            enabled.push(Location {
-                label: "Skyrim Data folder".to_string(),
-                root: data.clone(),
-            });
-        }
+        enabled.push(Location {
+            label: "Skyrim Data folder".to_string(),
+            root: data.clone(),
+        });
 
-        let text = std::fs::read_to_string(&plugins_txt)
+        let text = read_ansi(&plugins_txt)
             .map_err(|e| format!("Couldn't read {} ({e}).", plugins_txt.display()))?;
         let mut active = active_plugins(&text);
         active.extend(OFFICIAL_MASTERS.iter().map(|m| m.to_string()));
         // Creation Club content the game loads on its own.
-        if let Some(ccc) = data.as_ref().and_then(|d| d.parent()).map(|g| g.join("Skyrim.ccc")) {
-            if let Ok(text) = std::fs::read_to_string(ccc) {
+        if let Some(ccc) = data.parent().map(|g| g.join("Skyrim.ccc")) {
+            if let Ok(text) = read_ansi(&ccc) {
                 active.extend(text.lines().map(|l| l.trim().to_lowercase()).filter(|l| !l.is_empty()));
             }
         }
@@ -269,10 +336,12 @@ impl Setup {
             .iter()
             .map(|p| p.rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or_else(|| p.clone()))
             .collect();
-        let ini_archives = ini
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(|t| ini_archives(&t))
-            .unwrap_or_default();
+        let mut ini_archives: HashSet<String> = DEFAULT_ARCHIVES.iter().map(|a| a.to_string()).collect();
+        for ini in ["Skyrim.ini", "SkyrimCustom.ini"] {
+            if let Some(Ok(text)) = ini_dir.as_ref().map(|d| read_ansi(&d.join(ini))) {
+                ini_archives.extend(self::ini_archives(&text));
+            }
+        }
 
         let mut setup = Setup {
             label,
@@ -291,7 +360,7 @@ impl Setup {
             for (i, location) in locations.iter().enumerate() {
                 let Ok(entries) = std::fs::read_dir(&location.root) else { continue };
                 for entry in entries.flatten() {
-                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    if !followed_type(&entry).is_some_and(|t| t.is_file()) {
                         continue;
                     }
                     let path = entry.path();
@@ -311,18 +380,18 @@ impl Setup {
         Ok(setup)
     }
 
-    /// Whether an archive in an enabled location loads: Skyrim.ini names it,
-    /// or an active plugin claims it (`<plugin>.bsa`, `<plugin> - *.bsa`).
+    /// Whether an archive in an enabled location loads: the INIs (or the base
+    /// game's defaults) name it, or an active plugin claims it. Skyrim claims
+    /// only `<plugin>.bsa` and `<plugin> - Textures.bsa`; the wider
+    /// `<plugin> - *.bsa` rule is Fallout 3/New Vegas.
     fn loads(&self, archive: &Path) -> bool {
         let name = lower_name(archive);
         if self.ini_archives.contains(&name) {
             return true;
         }
         let stem = name.strip_suffix(".bsa").unwrap_or(&name);
-        self.active_stems.contains(stem)
-            || stem
-                .match_indices(" - ")
-                .any(|(i, _)| self.active_stems.contains(&stem[..i]))
+        let plugin = stem.strip_suffix(" - textures").unwrap_or(stem);
+        self.active_stems.contains(plugin)
     }
 
     fn location(&self, is_enabled: bool, i: usize) -> &Location {
@@ -405,7 +474,9 @@ impl Setup {
                 .match_entry(kind, value, false)
                 .map(|m| (m.entry.name.clone(), Some(m.entry.url.clone()).filter(|u| !u.trim().is_empty())))
         };
-        let full_texture = |value: &str| format!("textures\\{}", library::normalize_ref(value));
+        // normalize_ref lowercases ASCII only; walks and archives lowercase
+        // fully, so both sides must.
+        let full_texture = |value: &str| format!("textures\\{}", library::normalize_ref(value).to_lowercase());
         let wanted: HashSet<String> = refs
             .iter()
             .filter(|r| r.kind == "texture")
@@ -588,6 +659,9 @@ pub fn check_preset(setup: &Setup, library: &Library, path: &Path) -> PresetRead
 /// Everything one fix covers, and the presets it affects.
 #[derive(Debug, Serialize)]
 pub struct Cause {
+    /// Unique with `status` — titles aren't: a disabled mod folder and a
+    /// library entry can share a name.
+    pub key: String,
     pub status: Status,
     pub title: String,
     pub detail: String,
@@ -693,12 +767,17 @@ pub fn sweep(
         let slot = *cause_index.entry((check.status, key.key.clone())).or_insert_with(|| {
             causes.push((
                 Cause {
+                    key: key.key.clone(),
                     status: check.status,
                     title: key.title.clone(),
                     detail: key.detail.clone(),
                     references: Vec::new(),
                     presets: Vec::new(),
-                    source_url: check.source_url.clone(),
+                    // Only where getting that mod is the fix: a disabled mod
+                    // or an inactive plugin needs a click in MO2, not a page.
+                    source_url: (key.key.starts_with("source|") || key.key.starts_with("morph|"))
+                        .then(|| check.source_url.clone())
+                        .flatten(),
                 },
                 BTreeSet::new(),
             ));
@@ -814,6 +893,11 @@ mod tests {
             &bsa::tests::build(105, &[("textures\\arch2", &["b.dds"])]),
         );
         sb.file(
+            r"mo2\mods\Archived\Arch - Meshes.bsa",
+            &bsa::tests::build(105, &[("textures\\arch3", &["c.dds"])]),
+        );
+        sb.file("mo2\\mods\\Accent\\Caf\u{e9}.esp", b"");
+        sb.file(
             r"mo2\mods\Unclaimed\Loose.bsa",
             &bsa::tests::build(105, &[("textures\\unclaimed", &["u.dds"])]),
         );
@@ -821,9 +905,11 @@ mod tests {
         sb.file(r"mo2\overwrite\textures\ow\w.dds", b"");
         sb.file(
             r"mo2\profiles\P\modlist.txt",
-            b"+Hair Mod\n+Inactive Mod\n-Off Mod\n+Archived\n+Unclaimed\n-Looks_separator\n",
+            b"+Hair Mod\n+Inactive Mod\n-Off Mod\n+Archived\n+Unclaimed\n+Accent\n-Looks_separator\n",
         );
-        sb.file(r"mo2\profiles\P\plugins.txt", b"# comment\n*KS.esp\nInactive.esp\n*Arch.esp\n");
+        // Windows-1252, as MO2 writes it: 0xE9 is "\u{e9}".
+        sb.file(r"mo2\profiles\P\plugins.txt", b"# comment\n*KS.esp\nInactive.esp\n*Arch.esp\n*Caf\xe9.esp\n");
+        sb.file(r"mo2\profiles\P\settings.ini", b"[General]\nLocalSettings=true\n");
         sb.file(r"mo2\profiles\P\Skyrim.ini", b"[Archive]\nsResourceArchiveList2=Listed.bsa, Other.bsa\n");
         sb.file(r"game\Data\Listed.bsa", &bsa::tests::build(104, &[("textures\\listed", &["l.dds"])]));
         let s = |rel: &str| root.join(rel).display().to_string();
@@ -884,10 +970,12 @@ mod tests {
             r("plugin", "Inactive.esp"),
             r("plugin", "Off.esp"),
             r("plugin", "Nowhere.esp"),
+            r("plugin", "CAF\u{c9}.esp"),
             r("texture", r"Actors\Character\Overlays\Hair\H.dds"),
             r("texture", r"Data\Textures\ow\w.dds"),
             r("texture", r"arch\a.dds"),
             r("texture", r"arch2\b.dds"),
+            r("texture", r"arch3\c.dds"),
             r("texture", r"listed\l.dds"),
             r("texture", r"unclaimed\u.dds"),
             r("texture", r"off\o.dds"),
@@ -909,10 +997,16 @@ mod tests {
                 ("Inactive.esp", Missing, "installed (Inactive Mod) but not active in plugins.txt"),
                 ("Off.esp", Missing, "in disabled mod Off Mod"),
                 ("Nowhere.esp", Missing, "not installed"),
+                ("CAF\u{c9}.esp", Ready, "Accent"),
                 (r"Actors\Character\Overlays\Hair\H.dds", Ready, "Hair Mod"),
                 (r"Data\Textures\ow\w.dds", Ready, "Overwrite"),
                 (r"arch\a.dds", Ready, "Arch.bsa"),
                 (r"arch2\b.dds", Ready, "Arch - Textures.bsa"),
+                (
+                    r"arch3\c.dds",
+                    Missing,
+                    "inside Arch - Meshes.bsa, which doesn't load because no active plugin claims it"
+                ),
                 (r"listed\l.dds", Ready, "Listed.bsa"),
                 (
                     r"unclaimed\u.dds",

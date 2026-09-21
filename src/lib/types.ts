@@ -320,6 +320,8 @@ export type PresetReadiness = {
 
 /** Everything one fix covers, and the presets it affects. */
 export type ReadinessCause = {
+  /** Unique with `status`; titles aren't. */
+  key: string;
   status: ReadinessStatus;
   title: string;
   detail: string;

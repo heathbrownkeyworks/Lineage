@@ -15,7 +15,7 @@
 
   const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
   const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-  const causeKey = (c: ReadinessCause) => `${c.status}|${c.title}`;
+  const causeKey = (c: ReadinessCause) => `${c.status}|${c.key}`;
   const missingCauses = $derived(report?.causes.filter((c) => c.status === "missing") ?? []);
   const unconfirmedCauses = $derived(report?.causes.filter((c) => c.status === "unconfirmed") ?? []);
 

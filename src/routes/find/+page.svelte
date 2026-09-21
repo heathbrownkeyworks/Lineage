@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { ExternalLink, Globe, KeyRound, Pencil, Link as LinkIcon } from "lucide-svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import PageHeader from "$lib/components/PageHeader.svelte";
@@ -40,22 +41,39 @@
       });
   });
 
+  // Only the latest request may write its result: picking A, then B, must
+  // never leave A's answer on screen when it happens to land last.
+  let traceRequest = 0;
+  let readinessRequest = 0;
+
   /** Local and quick, so it runs beside the trace rather than after it. */
   async function checkReadiness(path: string) {
+    const id = ++readinessRequest;
     readiness = null;
     readinessError = null;
     checkingReadiness = true;
     try {
       const result = await readinessFor(path);
-      if (selectedPath === path) readiness = result;
+      if (id === readinessRequest) readiness = result;
     } catch (e) {
-      if (selectedPath === path) readinessError = typeof e === "string" ? e : String(e);
+      if (id === readinessRequest) readinessError = typeof e === "string" ? e : String(e);
     } finally {
-      if (selectedPath === path) checkingReadiness = false;
+      if (id === readinessRequest) checkingReadiness = false;
     }
   }
 
+  // Settings decide what "installed" means (profile, folders): check again.
+  let settingsSeen = appEvents.settingsVersion;
+  $effect(() => {
+    const version = appEvents.settingsVersion;
+    if (version === settingsSeen) return;
+    settingsSeen = version;
+    const path = untrack(() => selectedPath);
+    if (path) void checkReadiness(path);
+  });
+
   async function analyze(path: string) {
+    const id = ++traceRequest;
     selectedPath = path;
     report = null;
     error = null;
@@ -63,12 +81,17 @@
     progress = null;
     void checkReadiness(path);
     try {
-      report = await findAssets(path, (p) => (progress = p));
+      const result = await findAssets(path, (p) => {
+        if (id === traceRequest) progress = p;
+      });
+      if (id === traceRequest) report = result;
     } catch (e) {
-      error = typeof e === "string" ? e : String(e);
+      if (id === traceRequest) error = typeof e === "string" ? e : String(e);
     } finally {
-      running = false;
-      progress = null;
+      if (id === traceRequest) {
+        running = false;
+        progress = null;
+      }
     }
   }
 
