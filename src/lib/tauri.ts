@@ -26,6 +26,10 @@ import type {
   Mo2ProfileOption,
   MergedEntry,
   NexusValidation,
+  CompareProgress,
+  Comparison,
+  DuplicatesReport,
+  RemoveOutcome,
   PackOutcome,
   PackProgress,
   PresetInspection,
@@ -195,6 +199,24 @@ export async function renderRequirements(
   header: boolean,
 ): Promise<string> {
   return await invoke<string>("render_requirements", { lines, total, format, header });
+}
+
+// ---- compare --------------------------------------------------------------
+
+export async function comparePresets(left: string, right: string): Promise<Comparison> {
+  return await invoke<Comparison>("compare_presets", { left, right });
+}
+
+export async function findDuplicatePresets(
+  onProgress?: (p: CompareProgress) => void,
+): Promise<DuplicatesReport> {
+  const channel = new Channel<CompareProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return await invoke<DuplicatesReport>("find_duplicate_presets", { onProgress: channel });
+}
+
+export async function removePresets(paths: string[]): Promise<RemoveOutcome> {
+  return await invoke<RemoveOutcome>("remove_presets", { paths });
 }
 
 // ---- readiness ------------------------------------------------------------

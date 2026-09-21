@@ -2,12 +2,13 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { Search, ShieldCheck, Archive, Eraser, Layers, BookMarked, Package } from "lucide-svelte";
+  import { Search, ShieldCheck, GitCompare, Archive, Eraser, Layers, BookMarked, Package } from "lucide-svelte";
   import { backupNudge, uncoveredCount } from "$lib/stores/app.svelte";
 
   const items = [
     { href: "/find", label: "Find Assets", Icon: Search },
     { href: "/readiness", label: "Readiness", Icon: ShieldCheck },
+    { href: "/compare", label: "Compare", Icon: GitCompare },
     { href: "/backup", label: "Backup", Icon: Archive },
     { href: "/remove", label: "Clean Preset", Icon: Eraser },
     { href: "/batch", label: "Batch Clean", Icon: Layers },

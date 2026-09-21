@@ -4,6 +4,7 @@ pub mod assets;
 pub mod bsa;
 pub mod backup;
 pub mod clean;
+pub mod compare;
 pub mod detect;
 pub mod jslot;
 pub mod library;
@@ -108,6 +109,9 @@ pub fn run() {
             package::pack_release,
             readiness::readiness_for,
             readiness::readiness_sweep,
+            compare::compare_presets,
+            compare::find_duplicate_presets,
+            compare::remove_presets,
             library::library_list,
             library::library_save_entries,
             library::library_delete_entry,

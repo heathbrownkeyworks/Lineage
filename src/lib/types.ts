@@ -297,6 +297,74 @@ export type RenderLine = {
   used_by: number;
 };
 
+export type CompareSection =
+  | "head_parts"
+  | "vanilla_sliders"
+  | "custom_sliders"
+  | "sculpt"
+  | "tints"
+  | "face_textures"
+  | "face_overlays"
+  | "appearance"
+  | "body";
+
+export type ItemDiff = {
+  key: string;
+  left: string | null;
+  right: string | null;
+  same: boolean;
+  /** e.g. "12 vertices differ". */
+  note: string | null;
+};
+
+export type SectionDiff = {
+  section: CompareSection;
+  label: string;
+  differences: number;
+  items: ItemDiff[];
+};
+
+export type Comparison = {
+  left: string;
+  right: string;
+  same_bytes: boolean;
+  same_face: boolean;
+  face_differences: number;
+  body_differences: number;
+  sections: SectionDiff[];
+};
+
+export type PresetRef = {
+  path: string;
+  file_name: string;
+  modified: number;
+};
+
+export type DuplicateGroup = { presets: PresetRef[] };
+
+export type NearTwin = {
+  left: PresetRef;
+  right: PresetRef;
+  differences: number;
+  what: string[];
+};
+
+export type DuplicatesReport = {
+  total: number;
+  exact: DuplicateGroup[];
+  same_face: DuplicateGroup[];
+  near_twins: NearTwin[];
+  unreadable: FailedFile[];
+};
+
+export type CompareProgress = { current: number; total: number; detail: string };
+
+export type RemoveOutcome = {
+  snapshot_id: string;
+  removed: string[];
+  failed: FailedFile[];
+};
+
 export type ReadinessStatus = "missing" | "unconfirmed" | "ready";
 
 /** One reference a preset uses, checked against this setup. */

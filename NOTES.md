@@ -345,6 +345,20 @@ normalized. This is the only unavoidable reformatting case found.
   (`MikanEyes All in one SE.esp`, `Kyoe_BanginBrows.esp` against the
   installed `Kyoe BanginBrows.esp`). The e2e test brute-forces every
   reported-missing reference against enabled mods, so a false alarm fails.
+- **Compare reads presets as named facts, not positions.**
+  [compare.rs](src-tauri/src/compare.rs) keys every fact by
+  `(section, key)`: custom sliders by name, sculpt by `.tri` host (vertices
+  sorted), tints by mask texture, overlays by node with values sorted by
+  `(key, index)`. RaceMenu re-saves sliders and sculpt vertices in a
+  different order, so a positional diff calls two identical faces
+  different (thousands of raw differences between `CS-Jen-P` and `CS-Shae`,
+  which are the same face). A slider at 0 counts as absent; a tint at zero
+  alpha is "off"; numbers compare at 3 decimals. `mods`/`modNames` (load-
+  order indices) and `version` aren't part of a face. The real collection:
+  15 byte-identical pairs, 11 same-face groups (every one confirmed by an
+  independent order-insensitive check), 132 near-twins, in 2 s. Head part
+  types 7 and 8 exist in the wild (FacePartMod, CVEO, Serket eyes) though the
+  CK names only 0–6; they show as "Other part (type N)".
 - **Precedence rule: user > automatic > seed.** A manual library entry
   (kind, match_type, pattern — the "shadow key") always wins over a seed
   entry covering the same pattern; the shadowed seed entry is marked

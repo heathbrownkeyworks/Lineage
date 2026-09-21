@@ -11,6 +11,10 @@ A RaceMenu `.jslot` preset utility by **ColdSun Creative**.
   on Find Assets, and swept across your whole collection with the problems
   grouped by the fix that clears the most presets. Presets that won't parse
   at all are listed too.
+- **Compare** — find exact copies, the same face saved with different body
+  data, and near-twins a few details apart; clear out copies (snapshotted,
+  undoable). Pick any two presets to see exactly what differs, section by
+  section: head parts, sliders, sculpt, tints, overlays, body.
 - **Backup** — one action that archives every JSLOT file across your setup
   into a dated zip, folder structure preserved.
 - **Clean Preset** — strip what a preset author's own setup left in a JSLOT

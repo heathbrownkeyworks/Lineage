@@ -63,6 +63,8 @@
         return "Cleaned presets (batch)";
       case "restore-backup":
         return "Restored from backup";
+      case "remove-duplicates":
+        return "Removed duplicate presets";
       default:
         return op;
     }

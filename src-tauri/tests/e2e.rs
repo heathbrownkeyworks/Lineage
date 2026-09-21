@@ -515,3 +515,46 @@ fn real_sweep_reports_no_false_alarms() {
     eprintln!("{checked} missing references cross-checked");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Duplicates across the real collection: the survey's 15 byte-identical
+/// pairs exactly, same-face groups (at least the survey's 5), near-twins
+/// ranked, and every one of them confirmed by a direct comparison.
+#[test]
+fn real_duplicates_match_the_survey() {
+    use lineage_lib::compare;
+    let tmp = sandbox("compare");
+    let Some(settings) = real_mo2_settings(&tmp) else { return };
+    let paths: Vec<String> = scan::scan_settings(&settings).files.into_iter().map(|f| f.path).collect();
+    let started = std::time::Instant::now();
+    let report = compare::find_duplicates(&paths, &mut |_| {});
+    eprintln!(
+        "{} presets in {:?}: {} exact groups, {} same-face groups, {} near-twins",
+        report.total,
+        started.elapsed(),
+        report.exact.len(),
+        report.same_face.len(),
+        report.near_twins.len()
+    );
+    let names = |g: &compare::DuplicateGroup| g.presets.iter().map(|p| p.file_name.clone()).collect::<Vec<_>>().join(" | ");
+    for g in &report.same_face {
+        eprintln!("  same face: {}", names(g));
+    }
+    for t in report.near_twins.iter().take(12) {
+        eprintln!("  twin ({}): {} ~ {}: {:?}", t.differences, t.left.file_name, t.right.file_name, t.what);
+    }
+    assert_eq!(report.exact.len(), 15);
+    assert!(report.exact.iter().all(|g| g.presets.len() == 2));
+    assert!(report.same_face.len() >= 5);
+
+    for g in report.exact.iter().chain(&report.same_face) {
+        for p in &g.presets[1..] {
+            let c = compare::compare_paths(Path::new(&g.presets[0].path), Path::new(&p.path)).unwrap();
+            assert!(c.same_face && c.face_differences == 0, "{} vs {}", g.presets[0].file_name, p.file_name);
+        }
+    }
+    for t in &report.near_twins {
+        let c = compare::compare_paths(Path::new(&t.left.path), Path::new(&t.right.path)).unwrap();
+        assert_eq!(c.face_differences, t.differences, "{} vs {}", t.left.file_name, t.right.file_name);
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+}
