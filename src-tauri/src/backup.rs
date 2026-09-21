@@ -9,7 +9,7 @@
 use crate::scan;
 use crate::settings::{self};
 use chrono::Local;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -40,6 +40,36 @@ pub struct BackupOutcome {
     pub backed_up_at: i64,
 }
 
+/// Zip entry recording where every preset in a backup came from. Archives
+/// made before it existed only carry `<root label>/<relative path>` entry
+/// names, which `restore.rs` can still map back through the configured roots.
+pub const MANIFEST_ENTRY: &str = "lineage-manifest.json";
+
+/// Bump on an incompatible change to the manifest layout.
+pub const MANIFEST_FORMAT: u32 = 1;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupManifest {
+    pub format: u32,
+    pub created_at: i64,
+    pub entries: Vec<ManifestEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestEntry {
+    /// The zip entry this describes.
+    pub entry: String,
+    /// Where the preset lived when it was backed up. Informational only:
+    /// restore resolves through `root_id` + `rel_path` into a root that is
+    /// configured *now*, and never writes to this path directly — so an
+    /// archive, hand-made or not, can't aim a write anywhere else on disk.
+    pub source_path: String,
+    /// Root id first because it survives the user renaming a root's label.
+    pub root_id: String,
+    pub root_label: String,
+    pub rel_path: String,
+}
+
 /// Everything the Backup screen shows. Scans the roots, so it runs on a
 /// blocking worker.
 #[tauri::command]
@@ -67,7 +97,7 @@ pub async fn get_backup_status(app: tauri::AppHandle) -> Result<BackupStatus, St
 
 /// Zip entry names must be unique and zip-safe: forward slashes, label
 /// sanitized of the characters zip tooling chokes on.
-fn sanitize_label(label: &str) -> String {
+pub(crate) fn sanitize_label(label: &str) -> String {
     let cleaned: String = label
         .chars()
         .map(|c| match c {
@@ -109,6 +139,8 @@ pub fn perform_backup(
     }
 
     let mut total_size = 0u64;
+    let backed_up_at = chrono::Utc::now().timestamp();
+    let mut manifest_entries: Vec<ManifestEntry> = Vec::with_capacity(scan.total);
     let result = (|| -> Result<(), String> {
         let file = std::fs::File::create(&archive_path)
             .map_err(|e| format!("Couldn't create the backup archive: {e}"))?;
@@ -141,11 +173,31 @@ pub fn perform_backup(
                     f.rel_path.replace('\\', "/")
                 );
             }
+            manifest_entries.push(ManifestEntry {
+                entry: entry.clone(),
+                source_path: f.path.clone(),
+                root_id: f.root_id.clone(),
+                root_label: f.root_label.clone(),
+                rel_path: f.rel_path.clone(),
+            });
             zip.start_file(entry, options)
                 .map_err(|e| format!("backup archive error: {e}"))?;
             zip.write_all(&contents)
                 .map_err(|e| format!("backup archive error: {e}"))?;
         }
+        // Last, so a backup that fails partway never carries a manifest
+        // describing presets it doesn't hold.
+        let manifest = BackupManifest {
+            format: MANIFEST_FORMAT,
+            created_at: backed_up_at,
+            entries: std::mem::take(&mut manifest_entries),
+        };
+        let json = serde_json::to_vec_pretty(&manifest)
+            .map_err(|e| format!("backup manifest error: {e}"))?;
+        zip.start_file(MANIFEST_ENTRY, options)
+            .map_err(|e| format!("backup archive error: {e}"))?;
+        zip.write_all(&json)
+            .map_err(|e| format!("backup archive error: {e}"))?;
         zip.finish()
             .map_err(|e| format!("backup archive error: {e}"))?;
         Ok(())
@@ -159,7 +211,7 @@ pub fn perform_backup(
         archive_path: archive_path.display().to_string(),
         file_count: scan.total,
         total_size,
-        backed_up_at: chrono::Utc::now().timestamp(),
+        backed_up_at,
     })
 }
 

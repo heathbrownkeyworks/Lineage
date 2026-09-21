@@ -173,6 +173,29 @@ normalized. This is the only unavoidable reformatting case found.
 - **Snapshot zip entries** are `NNNN-<filename>` (index-prefixed) rather than
   full relative paths — same-named presets from different mods can share one
   snapshot; the JSON sidecar carries the absolute restore path for each entry.
+- **Backups carry a manifest; restore works without one.** Entries are
+  `<sanitized root label>/<rel path>`, which is enough to restore only while
+  the label still maps to a configured root. New backups add
+  `lineage-manifest.json` (written last, so a failed backup never carries
+  one) recording each preset's root id, label, relative path and original
+  absolute path. `restore.rs` resolves by root id first — it survives the
+  user renaming a label — then label; archives from before manifests fall
+  back to matching the top folder against `backup::sanitize_label` of each
+  root. Two roots that sanitize to the same label are left unmapped rather
+  than guessed, because which one the writer suffixed `-2` can't be
+  recovered from today's settings.
+- **Restore safety is enforced server-side.** The UI sends zip entry names,
+  never paths; targets are re-resolved and re-classified at restore time. A
+  target must sit inside a *currently configured* root: the manifest's
+  recorded absolute path is informational and never written to, and any
+  relative path with a non-plain component (`..`, `.`, root, drive prefix) is
+  refused — so no archive, hand-made or not, can aim a write elsewhere.
+  Files a restore would overwrite are snapshotted first (operation
+  `restore-backup`, undoable from History); if that snapshot fails the
+  restore aborts before touching anything. Missing presets are recreated
+  only when their folder still exists — a vanished folder under an MO2 root
+  is a removed mod, and recreating it would conjure a mod MO2 never
+  installed (same rule as snapshot restore).
 - **Vanilla skin textures are never requirements.** `faceTextures` records the
   head TextureSet slots and `tintInfo` the vanilla tint masks, so nearly every
   preset references `Actors\Character\<Race>\FemaleHead*.dds` and

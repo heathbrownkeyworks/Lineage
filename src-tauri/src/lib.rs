@@ -8,6 +8,7 @@ pub mod library;
 pub mod nexus;
 pub mod ops;
 pub mod rawjson;
+pub mod restore;
 pub mod scan;
 pub mod settings;
 pub mod snapshot;
@@ -80,6 +81,9 @@ pub fn run() {
             scan::scan_jslots,
             backup::get_backup_status,
             backup::run_backup,
+            restore::list_backups,
+            restore::inspect_backup,
+            restore::restore_backup,
             snapshot::list_snapshots,
             snapshot::restore_snapshot,
             snapshot::snapshot_stats,

@@ -4,9 +4,12 @@
  */
 import { invoke, Channel } from "@tauri-apps/api/core";
 import type {
+  BackupArchive,
   BackupDirCheck,
+  BackupInspection,
   BackupOutcome,
   BackupProgress,
+  BackupRestoreOutcome,
   BackupStatus,
   BatchProgress,
   BatchRemoveReport,
@@ -82,6 +85,29 @@ export async function runBackup(
   const channel = new Channel<BackupProgress>();
   if (onProgress) channel.onmessage = onProgress;
   return await invoke<BackupOutcome>("run_backup", { onProgress: channel });
+}
+
+export async function listBackups(): Promise<BackupArchive[]> {
+  return await invoke<BackupArchive[]>("list_backups");
+}
+
+export async function inspectBackup(
+  path: string,
+  onProgress: (p: BackupProgress) => void,
+): Promise<BackupInspection> {
+  const channel = new Channel<BackupProgress>();
+  channel.onmessage = onProgress;
+  return await invoke<BackupInspection>("inspect_backup", { path, onProgress: channel });
+}
+
+export async function restoreBackup(
+  path: string,
+  entries: string[],
+  onProgress: (p: BackupProgress) => void,
+): Promise<BackupRestoreOutcome> {
+  const channel = new Channel<BackupProgress>();
+  channel.onmessage = onProgress;
+  return await invoke<BackupRestoreOutcome>("restore_backup", { path, entries, onProgress: channel });
 }
 
 // ---- snapshots / history --------------------------------------------------

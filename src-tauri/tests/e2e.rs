@@ -3,6 +3,7 @@
 //! machines without the Nordic Souls MO2 instance.
 
 use lineage_lib::backup;
+use lineage_lib::restore;
 use lineage_lib::scan;
 use lineage_lib::settings::{AppSettings, JslotRoot, ModManagerKind, RootKind};
 use lineage_lib::snapshot;
@@ -202,5 +203,39 @@ fn snapshot_remove_restore_on_real_preset_copies() {
         assert_eq!(&std::fs::read(path).unwrap(), original, "{}", path.display());
     }
 
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// The one real backup on this machine predates manifests, so restore has to
+/// map it back through the root label alone. Inspection is read-only; the
+/// write path is covered by the unit tests, which run in temp folders.
+#[test]
+fn real_legacy_backup_maps_onto_the_live_collection() {
+    let archive = Path::new(r"C:\Users\coldsun\Documents\Lineage\Backups\JSLOT-BACKUP-08242026.zip");
+    let tmp = sandbox("inspect");
+    let Some(settings) = real_mo2_settings(&tmp) else { return };
+    if !archive.is_file() {
+        return;
+    }
+    let inspection = restore::inspect(&settings, archive, |_| {}).expect("inspects");
+    assert!(!inspection.has_manifest, "this archive predates manifests");
+    assert!(inspection.entries.len() > 1000, "saw {}", inspection.entries.len());
+    assert!(
+        inspection.unmapped_roots.is_empty(),
+        "every preset should map through its root label: {:?}",
+        inspection.unmapped_roots
+    );
+    let mut counts = std::collections::BTreeMap::new();
+    for e in &inspection.entries {
+        *counts.entry(format!("{:?}", e.status)).or_insert(0usize) += 1;
+        if let Some(target) = &e.target {
+            assert!(
+                target.to_ascii_lowercase().starts_with(&MODS.to_ascii_lowercase()),
+                "{target} resolved outside the mods root"
+            );
+        }
+    }
+    eprintln!("status counts for the real backup: {counts:?}");
+    assert!(counts.get("Unmapped").is_none(), "{counts:?}");
     let _ = std::fs::remove_dir_all(&tmp);
 }

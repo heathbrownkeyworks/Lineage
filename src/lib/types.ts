@@ -131,6 +131,57 @@ export type FailedFile = {
   reason: string;
 };
 
+/** A `JSLOT-BACKUP-*.zip` in the backup folder. */
+export type BackupArchive = {
+  path: string;
+  file_name: string;
+  size: number;
+  /** File mtime, unix seconds. */
+  modified: number;
+  /** When the backup was taken — only known for archives with a manifest. */
+  created_at: number | null;
+  preset_count: number;
+  has_manifest: boolean;
+  /** False when the file isn't a readable zip. */
+  readable: boolean;
+};
+
+/** How a preset in a backup compares with what's on disk now. Only
+ *  `modified` and `missing` are restorable. */
+export type BackupEntryStatus = "unchanged" | "modified" | "missing" | "folder_gone" | "unmapped";
+
+export type BackupEntry = {
+  /** Zip entry name — what gets sent back to restore it. */
+  entry: string;
+  file_name: string;
+  /** Mod folder under an MO2 root, otherwise the root's label. */
+  group: string;
+  rel_path: string;
+  target: string | null;
+  status: BackupEntryStatus;
+  size: number;
+};
+
+export type BackupInspection = {
+  path: string;
+  has_manifest: boolean;
+  created_at: number | null;
+  entries: BackupEntry[];
+  /** Top-level archive folders no configured root answers to. */
+  unmapped_roots: string[];
+};
+
+export type BackupRestoreOutcome = {
+  restored: string[];
+  unchanged: string[];
+  folder_gone: string[];
+  unmapped: string[];
+  failed: FailedFile[];
+  /** Snapshot of what the restore overwrote, for Undo. */
+  snapshot_id: string | null;
+};
+
+
 export type RestoreReport = {
   restored: string[];
   missing_destination: string[];
