@@ -17,6 +17,7 @@ import type {
   CleanCategory,
   CollectionReport,
   DetectedEnvironment,
+  ExportFormat,
   FindAssetsReport,
   FindProgress,
   JslotRoot,
@@ -27,6 +28,8 @@ import type {
   NexusValidation,
   PresetInspection,
   RateLimitInfo,
+  RenderLine,
+  RequirementsReport,
   RestoreReport,
   ScanResult,
   Settings,
@@ -158,6 +161,35 @@ export async function batchClean(
   const channel = new Channel<BatchProgress>();
   if (onProgress) channel.onmessage = onProgress;
   return await invoke<BatchCleanReport>("batch_clean", { paths, categories, onProgress: channel });
+}
+
+// ---- requirements ---------------------------------------------------------
+
+export async function listPresetsIn(folder: string): Promise<string[]> {
+  return await invoke<string[]>("list_presets_in", { folder });
+}
+
+export async function requirementsFor(
+  paths: string[],
+  categories: CleanCategory[],
+  onProgress?: (p: FindProgress) => void,
+): Promise<RequirementsReport> {
+  const channel = new Channel<FindProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return await invoke<RequirementsReport>("requirements_for", {
+    paths,
+    categories,
+    onProgress: channel,
+  });
+}
+
+export async function renderRequirements(
+  lines: RenderLine[],
+  total: number,
+  format: ExportFormat,
+  header: boolean,
+): Promise<string> {
+  return await invoke<string>("render_requirements", { lines, total, format, header });
 }
 
 // ---- nexus ----------------------------------------------------------------

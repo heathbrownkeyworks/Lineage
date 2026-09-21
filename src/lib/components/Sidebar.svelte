@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { Search, Archive, Eraser, Layers, BookMarked } from "lucide-svelte";
+  import { Search, Archive, Eraser, Layers, BookMarked, ListChecks } from "lucide-svelte";
   import { backupNudge, uncoveredCount } from "$lib/stores/app.svelte";
 
   const items = [
@@ -11,6 +11,7 @@
     { href: "/remove", label: "Clean Preset", Icon: Eraser },
     { href: "/batch", label: "Batch Clean", Icon: Layers },
     { href: "/library", label: "Asset Library", Icon: BookMarked },
+    { href: "/requirements", label: "Requirements", Icon: ListChecks },
   ];
 
   let version = $state("");

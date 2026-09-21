@@ -9,6 +9,7 @@ pub mod library;
 pub mod nexus;
 pub mod ops;
 pub mod rawjson;
+pub mod requirements;
 pub mod restore;
 pub mod scan;
 pub mod settings;
@@ -98,6 +99,9 @@ pub fn run() {
             assets::find_assets,
             assets::review_collection,
             assets::review_refresh,
+            requirements::list_presets_in,
+            requirements::requirements_for,
+            requirements::render_requirements,
             library::library_list,
             library::library_save_entries,
             library::library_delete_entry,

@@ -281,6 +281,29 @@ normalized. This is the only unavoidable reformatting case found.
   references it was created from. `assets.rs` shares the same function
   deliberately — if the grouping and the matching disagreed, a group would
   display a pattern that doesn't cover it.
+- **Requirements export works on the presets as they'll ship.**
+  [requirements.rs](src-tauri/src/requirements.rs) resolves every reference
+  across a chosen set of presets once — the case between Find Assets (one
+  preset) and Collection Review (everything) — and counts, per mod, the
+  distinct presets needing it (a union, never a sum). With clean categories
+  it cleans each preset in memory first, never on disk: a cleaned-away body
+  tattoo's texture mod is no longer a requirement. RaceMenu leads every list
+  (every JSLOT needs it, none references it), named through the library.
+  Requirements sharing a link merge into one line, named by the shared part
+  of their names (ECE_ and CME_ both → "Enhanced Character Edit SE").
+  Unidentified references are left out of the rendered text and shown in
+  the UI, so a pack never ships a silently short list.
+- **Rendering lives in Rust so the house style is tested.** Forge BBCode per
+  ColdSun's Forge house style, as on Horde's shipped page: amber `size=5`
+  header, `[*][url=…]Name[/url] - used by N of M presets`, no usage note when
+  every preset needs a mod. Em and en dashes in Nexus titles become hyphens;
+  square brackets in names become parentheses, because Nexus strips unknown
+  tags and `[Dint999] HairPack02` would lose its author.
+- **`meta.ini` can mislabel the game.** An MO2 SSE instance records
+  `gameName=SkyrimSE` even for a mod downloaded from Oldrim Nexus (Kai's
+  makeup: Oldrim mod 72955, recorded as SSE 72955 with an empty `url=`), so
+  a URL built from it points at an unrelated SSE page. Only a *user* library
+  entry beats `meta.ini`; seed entries only fill gaps.
 - **Precedence rule: user > automatic > seed.** A manual library entry
   (kind, match_type, pattern — the "shadow key") always wins over a seed
   entry covering the same pattern; the shadowed seed entry is marked

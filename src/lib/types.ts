@@ -261,6 +261,42 @@ export type BatchCleanReport = {
   failed: FailedFile[];
 };
 
+/** One mod a preset pack needs. */
+export type Requirement = {
+  key: string;
+  name: string;
+  url: string | null;
+  /** Distinct chosen presets that need it. */
+  used_by: number;
+  resolved_by: string;
+  /** Empty for RaceMenu, which no preset references and every one needs. */
+  assets: AssetRef[];
+};
+
+export type UnknownReference = {
+  asset: AssetRef;
+  used_by: number;
+};
+
+export type RequirementsReport = {
+  preset_count: number;
+  failed: FailedFile[];
+  requirements: Requirement[];
+  /** Left out of the rendered list — shown so a pack never ships short. */
+  unknown: UnknownReference[];
+  api_key_present: boolean;
+  nexus_error: string | null;
+  library_warning: string | null;
+};
+
+export type ExportFormat = "bbcode" | "markdown" | "plain";
+
+export type RenderLine = {
+  name: string;
+  url: string | null;
+  used_by: number;
+};
+
 /** Nexus API key validation result. */
 export type NexusValidation = {
   name: string;

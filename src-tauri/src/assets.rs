@@ -181,11 +181,11 @@ fn note_texture(
     note_ref(map, "texture", trimmed, section);
 }
 
-struct Extracted {
-    plugins: Vec<AssetRef>,
-    textures: Vec<AssetRef>,
-    morphs: Vec<AssetRef>,
-    vanilla: Vec<String>,
+pub(crate) struct Extracted {
+    pub plugins: Vec<AssetRef>,
+    pub textures: Vec<AssetRef>,
+    pub morphs: Vec<AssetRef>,
+    pub vanilla: Vec<String>,
 }
 
 fn note_ref(map: &mut HashMap<String, AssetRef>, kind: &str, value: &str, section: &str) {
@@ -232,7 +232,7 @@ fn collect_path_strings(
     }
 }
 
-fn extract(preset: &Value) -> Extracted {
+pub(crate) fn extract(preset: &Value) -> Extracted {
     let mut plugins: HashMap<String, AssetRef> = HashMap::new();
     let mut textures: HashMap<String, AssetRef> = HashMap::new();
     let mut morphs: HashMap<String, AssetRef> = HashMap::new();
@@ -322,7 +322,7 @@ fn extract(preset: &Value) -> Extracted {
 
 /// Sort a dedup map into a stable Vec, case-insensitive by value — shared by
 /// `extract` and `collect_refs` so both sort identically.
-fn sort_refs(map: HashMap<String, AssetRef>) -> Vec<AssetRef> {
+pub(crate) fn sort_refs(map: HashMap<String, AssetRef>) -> Vec<AssetRef> {
     let mut v: Vec<AssetRef> = map.into_values().collect();
     v.sort_by(|a, b| a.value.to_ascii_lowercase().cmp(&b.value.to_ascii_lowercase()));
     v
@@ -332,7 +332,7 @@ fn sort_refs(map: HashMap<String, AssetRef>) -> Vec<AssetRef> {
 // Local context: mod folders, meta.ini, Vortex manifest
 // ---------------------------------------------------------------------------
 
-struct LocalContext {
+pub(crate) struct LocalContext {
     /// Top-level mod folders (MO2 mods dir / Vortex staging), name → path.
     mod_folders: Vec<(String, PathBuf)>,
     data_dir: Option<PathBuf>,
@@ -340,7 +340,7 @@ struct LocalContext {
     vortex_map: HashMap<String, String>,
 }
 
-fn build_context(settings: &AppSettings) -> LocalContext {
+pub(crate) fn build_context(settings: &AppSettings) -> LocalContext {
     let mut mod_folders = Vec::new();
     let mods_dir = match settings.mod_manager {
         ModManagerKind::Mo2 => settings.mo2_mods_folder.trim(),
@@ -1317,7 +1317,7 @@ fn assemble(
 }
 
 /// Load the Asset Library from the app config dir — shared by both commands.
-fn library_for(app: &tauri::AppHandle) -> Result<crate::library::Library, String> {
+pub(crate) fn library_for(app: &tauri::AppHandle) -> Result<crate::library::Library, String> {
     use tauri::Manager;
     let config_dir = app
         .path()

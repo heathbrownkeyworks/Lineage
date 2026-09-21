@@ -276,3 +276,62 @@ fn real_backup_covers_nearly_everything_on_disk() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// A real pack, as it would ship: requirements computed after an in-memory
+/// clean with the default categories, rendered in the house BBCode. Offline
+/// (no Nexus names), read-only against the real mods folder.
+#[test]
+fn real_pack_requirements_render_in_the_house_style() {
+    use lineage_lib::clean::CleanCategory::*;
+    use lineage_lib::requirements::{self, ExportFormat, RenderLine};
+    let pack = Path::new(r"D:\Nordic Souls\mods\ColdSun's Face Presets");
+    let tmp = sandbox("requirements");
+    let Some(settings) = real_mo2_settings(&tmp) else { return };
+    let Some(appdata) = std::env::var_os("APPDATA") else { return };
+    if !pack.is_dir() {
+        return;
+    }
+    let library = lineage_lib::library::load_from_dir(&PathBuf::from(appdata).join("com.coldsun.lineage"));
+    let paths = requirements::presets_in(pack).unwrap();
+    let before: Vec<Vec<u8>> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+
+    let report = requirements::build_report(
+        None,
+        &settings,
+        &library,
+        &paths,
+        &[BodyMorphs, BodyOverlays, Skeleton, WeaponCamera],
+        &mut |_| {},
+    );
+    assert!(report.preset_count > 10, "saw {} presets", report.preset_count);
+    assert_eq!(report.requirements[0].name, "RaceMenu", "RaceMenu leads");
+    assert_eq!(report.requirements[0].used_by, report.preset_count);
+    let mut links = std::collections::HashSet::new();
+    for r in &report.requirements {
+        if let Some(url) = &r.url {
+            assert!(links.insert(url.to_ascii_lowercase()), "{} is listed twice", r.name);
+        }
+    }
+
+    let lines: Vec<RenderLine> = report
+        .requirements
+        .iter()
+        .map(|r| RenderLine { name: r.name.clone(), url: r.url.clone(), used_by: r.used_by })
+        .collect();
+    let bbcode = requirements::render(&lines, report.preset_count, ExportFormat::Bbcode, true);
+    assert!(!bbcode.contains('\u{2014}') && !bbcode.contains('\u{2013}'));
+    eprintln!(
+        "{} presets, {} requirements, {} unidentified references\n{bbcode}",
+        report.preset_count,
+        report.requirements.len(),
+        report.unknown.len()
+    );
+    for u in report.unknown.iter().take(8) {
+        eprintln!("  unidentified: {} ({}) used by {}", u.asset.value, u.asset.kind, u.used_by);
+    }
+
+    // Read-only: the clean happened in memory.
+    let after: Vec<Vec<u8>> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    assert!(before == after, "a preset on disk changed");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
