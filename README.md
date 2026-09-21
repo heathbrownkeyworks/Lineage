@@ -5,6 +5,12 @@ A RaceMenu `.jslot` preset utility by **ColdSun Creative**.
 - **Find Assets** — pick a preset and trace every plugin, texture, and morph
   it references back to the mod it came from, with Nexus Mods matches, so you
   know exactly what to download to make a preset work.
+- **Readiness** — will a preset load as its author made it on *your* setup?
+  Every plugin it uses must be installed and active, every texture must
+  exist loose or inside an archive that actually loads. Shown for one preset
+  on Find Assets, and swept across your whole collection with the problems
+  grouped by the fix that clears the most presets. Presets that won't parse
+  at all are listed too.
 - **Backup** — one action that archives every JSLOT file across your setup
   into a dated zip, folder structure preserved.
 - **Clean Preset** — strip what a preset author's own setup left in a JSLOT

@@ -48,7 +48,7 @@ pub struct ScanResult {
 /// The set of enabled top-level mod folder names from an MO2 profile's
 /// modlist.txt (lines starting with `+`), lowercased. None when unreadable —
 /// the caller falls back to walking everything rather than scanning nothing.
-fn enabled_mo2_mods(profile_dir: &str) -> Option<HashSet<String>> {
+pub(crate) fn enabled_mo2_mods(profile_dir: &str) -> Option<HashSet<String>> {
     let profile_dir = profile_dir.trim();
     if profile_dir.is_empty() {
         return None;

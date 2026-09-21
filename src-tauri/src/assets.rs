@@ -388,7 +388,7 @@ pub(crate) fn build_context(settings: &AppSettings) -> LocalContext {
 }
 
 /// The Nexus mod id from an MO2 meta.ini ([General] modid=), if positive.
-fn meta_ini_mod_id(mod_folder: &Path) -> Option<u32> {
+pub(crate) fn meta_ini_mod_id(mod_folder: &Path) -> Option<u32> {
     let text = std::fs::read_to_string(mod_folder.join("meta.ini")).ok()?;
     let value = text.lines().find_map(|line| {
         line.trim()
@@ -1183,7 +1183,7 @@ pub struct UnknownGroup {
 /// loose into a shared folder still prefix every one of them, and morph names
 /// carry their slider family the same way, so this is the only attribution
 /// handle those two cases offer.
-fn leading_token_prefix(name: &str) -> Option<String> {
+pub(crate) fn leading_token_prefix(name: &str) -> Option<String> {
     let idx = name.find(['_', '-'])?;
     let token = &name[..idx];
     let usable = token.len() >= 3 && token.chars().all(|c| c.is_ascii_alphanumeric());
@@ -1193,7 +1193,7 @@ fn leading_token_prefix(name: &str) -> Option<String> {
 /// Where a texture's group starts: the first segment that is a mod's own
 /// folder rather than a container. When every folder is generic the file is
 /// sitting loose and its filename prefix is used instead.
-fn texture_group_pattern(norm: &str) -> (String, &'static str) {
+pub(crate) fn texture_group_pattern(norm: &str) -> (String, &'static str) {
     let seg: Vec<&str> = norm.split('\\').collect();
     let (folders, file) = seg.split_at(seg.len() - 1);
     for (i, s) in folders.iter().enumerate() {
@@ -1221,7 +1221,7 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> &'a str {
 /// lowercased path, so a grouped entry reads like the hand-written ones
 /// (`Actors\Character\Overlays\Koralina_Male\`, not all lowercase). Matching
 /// is case-insensitive either way; this is purely how it reads.
-fn display_pattern(lower_pattern: &str, sample: &str) -> String {
+pub(crate) fn display_pattern(lower_pattern: &str, sample: &str) -> String {
     let cased = sample.trim().replace('/', "\\");
     let cased = cased.trim_start_matches('\\');
     let cased = strip_prefix_ci(cased, "data\\");

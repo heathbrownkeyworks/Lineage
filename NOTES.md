@@ -321,6 +321,27 @@ normalized. This is the only unavoidable reformatting case found.
   written beside its destination as a `.lineage-partial`, reopened and
   checked (entry list, every preset parses, no chosen category left), then
   renamed. Real run: 1,327 of 1,350 ColdSun presets had something to clean.
+- **Readiness checks real files; slider families are never "Missing".**
+  [readiness.rs](src-tauri/src/readiness.rs) indexes the active setup once:
+  MO2 `modlist.txt` (separators skipped), `plugins.txt` (`*` = active;
+  official masters and `Skyrim.ccc` count as active), the overwrite folder,
+  `Data`, and every mod root's plugins and BSAs. Loose textures are found by
+  a walk that only descends folders a wanted file sits under, so 1,900+ mod
+  folders take milliseconds. A BSA loads when `Skyrim.ini`
+  (`sResourceArchiveList`/`2`, the profile's own INI under MO2) names it or
+  an active plugin claims it (`X.bsa`, `X - *.bsa`); archives are only read
+  for textures still unfound. [bsa.rs](src-tauri/src/bsa.rs) reads name
+  tables only (v103–105). Slider families match the library's Nexus id
+  against `meta.ini` modids, and since any mod can provide a family, "no
+  enabled mod from that page" is Unconfirmed, never Missing. On the real
+  setup ECE's CME_/ECE_ families are unconfirmed in 1,762 of 1,817 presets
+  (12302 isn't installed and no tri, script or plugin names those sliders),
+  so the sweep's "ready" means nothing Missing and unconfirmed is counted
+  apart. First real sweep: 854 ready, 963 missing something, 2.6 s; the
+  big causes are presets naming other versions' plugins
+  (`MikanEyes All in one SE.esp`, `Kyoe_BanginBrows.esp` against the
+  installed `Kyoe BanginBrows.esp`). The e2e test brute-forces every
+  reported-missing reference against enabled mods, so a false alarm fails.
 - **Precedence rule: user > automatic > seed.** A manual library entry
   (kind, match_type, pattern — the "shadow key") always wins over a seed
   entry covering the same pattern; the shadowed seed entry is marked

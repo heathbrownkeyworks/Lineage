@@ -1,6 +1,7 @@
 // Public so the integration tests in tests/ can drive the same code paths
 // the commands use.
 pub mod assets;
+pub mod bsa;
 pub mod backup;
 pub mod clean;
 pub mod detect;
@@ -10,6 +11,7 @@ pub mod nexus;
 pub mod ops;
 pub mod package;
 pub mod rawjson;
+pub mod readiness;
 pub mod requirements;
 pub mod restore;
 pub mod scan;
@@ -104,6 +106,8 @@ pub fn run() {
             requirements::requirements_for,
             requirements::render_requirements,
             package::pack_release,
+            readiness::readiness_for,
+            readiness::readiness_sweep,
             library::library_list,
             library::library_save_entries,
             library::library_delete_entry,

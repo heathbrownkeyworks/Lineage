@@ -7,9 +7,10 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import LinkModal from "$lib/components/LinkModal.svelte";
-  import { findAssets, getSettings } from "$lib/tauri";
+  import ReadinessPanel from "$lib/components/ReadinessPanel.svelte";
+  import { findAssets, getSettings, readinessFor } from "$lib/tauri";
   import { appEvents } from "$lib/stores/app.svelte";
-  import type { AssetRef, FindAssetsReport, FindProgress, IdentifiedGroup } from "$lib/types";
+  import type { AssetRef, FindAssetsReport, FindProgress, IdentifiedGroup, PresetReadiness } from "$lib/types";
 
   let selectedPath = $state<string | null>(null);
   let report = $state<FindAssetsReport | null>(null);
@@ -18,6 +19,9 @@
   let error = $state<string | null>(null);
   let settingsOpen = $state(false);
   let apiKeyPresent = $state(true);
+  let readiness = $state<PresetReadiness | null>(null);
+  let checkingReadiness = $state(false);
+  let readinessError = $state<string | null>(null);
 
   // Link modal — a single instance driven by whichever card/row opened it.
   let linkOpen = $state(false);
@@ -36,12 +40,28 @@
       });
   });
 
+  /** Local and quick, so it runs beside the trace rather than after it. */
+  async function checkReadiness(path: string) {
+    readiness = null;
+    readinessError = null;
+    checkingReadiness = true;
+    try {
+      const result = await readinessFor(path);
+      if (selectedPath === path) readiness = result;
+    } catch (e) {
+      if (selectedPath === path) readinessError = typeof e === "string" ? e : String(e);
+    } finally {
+      if (selectedPath === path) checkingReadiness = false;
+    }
+  }
+
   async function analyze(path: string) {
     selectedPath = path;
     report = null;
     error = null;
     running = true;
     progress = null;
+    void checkReadiness(path);
     try {
       report = await findAssets(path, (p) => (progress = p));
     } catch (e) {
@@ -154,6 +174,8 @@
       {#if report.library_warning}
         <div class="note note-warning">{report.library_warning}</div>
       {/if}
+
+      <ReadinessPanel {readiness} checking={checkingReadiness} error={readinessError} />
 
       {#if report.identified.length === 0 && report.unknown.length === 0}
         <EmptyState

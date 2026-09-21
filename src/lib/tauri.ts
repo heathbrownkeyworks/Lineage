@@ -29,6 +29,8 @@ import type {
   PackOutcome,
   PackProgress,
   PresetInspection,
+  PresetReadiness,
+  ReadinessProgress,
   RateLimitInfo,
   RenderLine,
   RequirementsReport,
@@ -38,6 +40,7 @@ import type {
   SingleCleanOutcome,
   SnapshotInfo,
   SnapshotStats,
+  SweepReport,
 } from "./types";
 
 // ---- settings -------------------------------------------------------------
@@ -192,6 +195,20 @@ export async function renderRequirements(
   header: boolean,
 ): Promise<string> {
   return await invoke<string>("render_requirements", { lines, total, format, header });
+}
+
+// ---- readiness ------------------------------------------------------------
+
+export async function readinessFor(path: string): Promise<PresetReadiness> {
+  return await invoke<PresetReadiness>("readiness_for", { path });
+}
+
+export async function readinessSweep(
+  onProgress?: (p: ReadinessProgress) => void,
+): Promise<SweepReport> {
+  const channel = new Channel<ReadinessProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return await invoke<SweepReport>("readiness_sweep", { onProgress: channel });
 }
 
 export async function packRelease(

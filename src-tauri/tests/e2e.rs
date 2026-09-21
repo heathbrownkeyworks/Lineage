@@ -415,3 +415,103 @@ fn real_packs_build_verify_and_leave_sources_alone() {
     eprintln!("subfolders: {} presets, {} cleaned, {} head exports", out.presets, out.cleaned, out.head_exports);
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// The BSA reader against the real base-game archives: every name the
+/// header promises comes out, and textures sit where they should.
+#[test]
+fn real_game_archives_list_every_file() {
+    let data = Path::new(r"D:\Nordic Souls\Game Root\Data");
+    if !data.is_dir() {
+        return;
+    }
+    let mut total = 0usize;
+    for n in 0..=8 {
+        let archive = data.join(format!("Skyrim - Textures{n}.bsa"));
+        if !archive.is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(&archive).unwrap();
+        let promised = u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
+        let mut names = Vec::new();
+        lineage_lib::bsa::for_each_path(&archive, &mut |p| names.push(p.to_string())).unwrap();
+        assert_eq!(names.len(), promised, "{}", archive.display());
+        assert!(names.iter().all(|p| p.starts_with("textures\\") && p == &p.to_lowercase()));
+        total += names.len();
+    }
+    assert!(total > 10_000, "only {total} textures in the base game?");
+    eprintln!("{total} base-game textures listed");
+}
+
+/// Sweep the real setup. Every texture reported missing is cross-checked
+/// by brute force — a stat in every enabled mod, overwrite and Data — and
+/// every missing plugin against plugins.txt directly, so a false alarm
+/// fails here rather than on Heath's screen.
+#[test]
+fn real_sweep_reports_no_false_alarms() {
+    use lineage_lib::readiness::{self, Status};
+    let tmp = sandbox("readiness");
+    let Some(mut settings) = real_mo2_settings(&tmp) else { return };
+    settings.skyrim_folder = r"D:\Nordic Souls\Game Root".into();
+    let Some(appdata) = std::env::var_os("APPDATA") else { return };
+    let library = lineage_lib::library::load_from_dir(&PathBuf::from(appdata).join("com.coldsun.lineage"));
+
+    let started = std::time::Instant::now();
+    let setup = readiness::Setup::load(&settings).unwrap();
+    let indexed = started.elapsed();
+    let paths: Vec<String> = scan::scan_settings(&settings).files.into_iter().map(|f| f.path).collect();
+    let report = readiness::sweep(&setup, &library, &paths, &mut |_| {});
+    eprintln!(
+        "indexed in {indexed:?}, swept in {:?}: {} presets, {} ready, {} missing, {} unconfirmed, {} unreadable",
+        started.elapsed(),
+        report.total,
+        report.ready,
+        report.missing,
+        report.unconfirmed,
+        report.unreadable.len()
+    );
+    for c in report.causes.iter().take(12) {
+        eprintln!(
+            "  {:?} {} ({} presets, {} refs, e.g. {:?}): {}",
+            c.status,
+            c.title,
+            c.presets.len(),
+            c.references.len(),
+            c.references.first(),
+            c.detail
+        );
+    }
+    assert_eq!(report.total + report.unreadable.len(), paths.len());
+    assert_eq!(report.ready + report.missing, report.total);
+
+    let modlist = std::fs::read_to_string(Path::new(PROFILE).join("modlist.txt")).unwrap();
+    let mut enabled: Vec<PathBuf> = modlist
+        .lines()
+        .filter_map(|l| l.strip_prefix('+'))
+        .map(|m| Path::new(MODS).join(m.trim()))
+        .collect();
+    enabled.push(PathBuf::from(r"D:\Nordic Souls\overwrite"));
+    enabled.push(PathBuf::from(r"D:\Nordic Souls\Game Root\Data"));
+    let plugins_txt = std::fs::read_to_string(Path::new(PROFILE).join("plugins.txt")).unwrap().to_lowercase();
+
+    let mut checked = 0;
+    for cause in report.causes.iter().filter(|c| c.status == Status::Missing) {
+        for r in &cause.references {
+            let lower = r.to_lowercase();
+            if lower.ends_with(".esp") || lower.ends_with(".esm") || lower.ends_with(".esl") {
+                let installed = enabled.iter().any(|m| m.join(r.trim()).is_file());
+                let active = plugins_txt.lines().any(|l| l.trim() == format!("*{}", lower.trim()));
+                assert!(!(installed && active), "{r} was reported missing but is installed and active");
+            } else {
+                let norm = lower.trim().replace('/', "\\");
+                let norm = norm.trim_start_matches('\\');
+                let norm = norm.strip_prefix("data\\").unwrap_or(norm);
+                let norm = norm.strip_prefix("textures\\").unwrap_or(norm);
+                let loose = enabled.iter().find(|m| m.join("textures").join(norm).is_file());
+                assert!(loose.is_none(), "{r} was reported missing but is loose in {:?}", loose);
+            }
+            checked += 1;
+        }
+    }
+    eprintln!("{checked} missing references cross-checked");
+    let _ = std::fs::remove_dir_all(&tmp);
+}

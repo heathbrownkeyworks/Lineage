@@ -297,6 +297,56 @@ export type RenderLine = {
   used_by: number;
 };
 
+export type ReadinessStatus = "missing" | "unconfirmed" | "ready";
+
+/** One reference a preset uses, checked against this setup. */
+export type ReadinessCheck = {
+  kind: string;
+  value: string;
+  status: ReadinessStatus;
+  /** Where it was found, or why not. */
+  detail: string;
+  source_name: string | null;
+  source_url: string | null;
+};
+
+export type PresetReadiness = {
+  preset_path: string;
+  profile: string;
+  /** Missing first, then unconfirmed, then ready. */
+  checks: ReadinessCheck[];
+  parse_error: string | null;
+};
+
+/** Everything one fix covers, and the presets it affects. */
+export type ReadinessCause = {
+  status: ReadinessStatus;
+  title: string;
+  detail: string;
+  references: string[];
+  presets: string[];
+  source_url: string | null;
+};
+
+export type SweepReport = {
+  profile: string;
+  total: number;
+  /** Nothing missing. `ready + missing === total`. */
+  ready: number;
+  missing: number;
+  /** Presets with an unconfirmed slider family, in either group. */
+  unconfirmed: number;
+  unreadable: FailedFile[];
+  causes: ReadinessCause[];
+};
+
+export type ReadinessProgress = {
+  stage: "indexing" | "parsing" | "checking";
+  current: number;
+  total: number;
+  detail: string;
+};
+
 export type PackProgress = {
   current: number;
   total: number;
