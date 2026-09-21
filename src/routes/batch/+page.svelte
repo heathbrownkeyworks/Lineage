@@ -10,7 +10,7 @@
     getBackupStatus,
     formatWhen,
   } from "$lib/tauri";
-  import { appEvents } from "$lib/stores/app.svelte";
+  import { appEvents, bumpPresets } from "$lib/stores/app.svelte";
   import type {
     BackupStatus,
     BatchProgress,
@@ -81,6 +81,7 @@
     progress = null;
     try {
       result = await batchRemove([...selected], (p) => (progress = p));
+      bumpPresets();
       scanReport = null;
       selected = new Set();
     } catch (e) {

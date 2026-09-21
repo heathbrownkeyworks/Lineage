@@ -10,7 +10,7 @@
     restoreSnapshot,
     getBackupStatus,
   } from "$lib/tauri";
-  import { appEvents } from "$lib/stores/app.svelte";
+  import { appEvents, bumpPresets } from "$lib/stores/app.svelte";
   import type { PresetInspection, SingleRemoveOutcome } from "$lib/types";
 
   let selectedPath = $state<string | null>(null);
@@ -55,6 +55,7 @@
     error = null;
     try {
       outcome = await removeBodyMorphs(selectedPath);
+      bumpPresets();
       // Refresh the inspection so the panel reflects the new state.
       inspection = await inspectPreset(selectedPath);
     } catch (e) {
@@ -70,6 +71,7 @@
     error = null;
     try {
       const report = await restoreSnapshot(outcome.snapshot_id);
+      bumpPresets();
       if (report.failed.length > 0) {
         error = `Undo failed for ${report.failed[0].path}: ${report.failed[0].reason}`;
       } else {

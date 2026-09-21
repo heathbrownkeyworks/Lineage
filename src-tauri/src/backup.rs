@@ -23,6 +23,9 @@ pub struct BackupStatus {
     /// False when the recorded archive no longer exists on disk — the UI then
     /// treats the backup as missing.
     pub last_backup_exists: bool,
+    /// Presets on disk the last backup doesn't cover — see
+    /// `changed_since_backup`. None when there's no usable backup.
+    pub changed_since_backup: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +73,33 @@ pub struct ManifestEntry {
     pub rel_path: String,
 }
 
+/// How many presets on disk the last backup does not cover: ones that aren't
+/// in it at all, plus ones modified after it was taken. None when there is no
+/// usable last backup — never made, moved, or unreadable.
+///
+/// Membership is checked against the archive's contents, not by timestamp:
+/// MO2 keeps a file's original mtime when it installs a mod from an archive,
+/// so a preset pack installed yesterday can look years older than the backup.
+/// Timestamps only decide "modified since", for presets the backup does hold.
+/// Presets deleted since the backup don't count — the backup still has them.
+pub fn changed_since_backup(
+    settings: &crate::settings::AppSettings,
+    scan: &scan::ScanResult,
+) -> Option<usize> {
+    let archive = PathBuf::from(settings.last_backup_path.as_deref()?);
+    if !archive.is_file() {
+        return None;
+    }
+    let covered = crate::restore::archived_targets(settings, &archive).ok()?;
+    let since = settings.last_backup_at.unwrap_or(0);
+    Some(
+        scan.files
+            .iter()
+            .filter(|f| !covered.contains(&f.path.to_ascii_lowercase()) || f.modified > since)
+            .count(),
+    )
+}
+
 /// Everything the Backup screen shows. Scans the roots, so it runs on a
 /// blocking worker.
 #[tauri::command]
@@ -89,6 +119,7 @@ pub async fn get_backup_status(app: tauri::AppHandle) -> Result<BackupStatus, St
             last_backup_at: settings.last_backup_at,
             last_backup_path: settings.last_backup_path.clone(),
             last_backup_exists,
+            changed_since_backup: changed_since_backup(&settings, &scan),
         })
     })
     .await
@@ -245,5 +276,67 @@ mod tests {
         assert_eq!(sanitize_label("MO2 mods (enabled)"), "MO2 mods (enabled)");
         assert_eq!(sanitize_label("Bad:Label*?"), "Bad_Label__");
         assert_eq!(sanitize_label("  . "), "root");
+    }
+
+    fn set_mtime(path: &std::path::Path, unix: i64) {
+        let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix as u64);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    #[test]
+    fn changed_since_backup_counts_new_and_modified_but_not_deleted() {
+        use crate::settings::{AppSettings, JslotRoot, RootKind};
+        let base = std::env::temp_dir().join(format!("lineage-nudge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let presets = base.join("presets");
+        std::fs::create_dir_all(&presets).unwrap();
+        for name in ["a", "b", "c"] {
+            std::fs::write(presets.join(format!("{name}.jslot")), name).unwrap();
+        }
+        let mut settings = AppSettings {
+            jslot_roots: vec![JslotRoot {
+                id: "p".into(),
+                label: "Presets".into(),
+                path: presets.display().to_string(),
+                kind: RootKind::Plain,
+            }],
+            backup_dir: base.join("Backups").display().to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            changed_since_backup(&settings, &scan::scan_settings(&settings)),
+            None,
+            "no backup yet"
+        );
+
+        let outcome = perform_backup(&settings, |_| {}).unwrap();
+        settings.last_backup_path = Some(outcome.archive_path.clone());
+        settings.last_backup_at = Some(outcome.backed_up_at);
+        let since = outcome.backed_up_at;
+        for name in ["a", "b", "c"] {
+            set_mtime(&presets.join(format!("{name}.jslot")), since - 60);
+        }
+        assert_eq!(changed_since_backup(&settings, &scan::scan_settings(&settings)), Some(0));
+
+        // Edited after the backup: counted.
+        std::fs::write(presets.join("a.jslot"), "a2").unwrap();
+        set_mtime(&presets.join("a.jslot"), since + 60);
+        // Installed after the backup but carrying an old timestamp, the way
+        // MO2 extracts a mod: counted, because the archive doesn't hold it.
+        std::fs::write(presets.join("d.jslot"), "d").unwrap();
+        set_mtime(&presets.join("d.jslot"), since - 100_000);
+        // Deleted since: not counted — the backup still has it.
+        std::fs::remove_file(presets.join("c.jslot")).unwrap();
+        assert_eq!(changed_since_backup(&settings, &scan::scan_settings(&settings)), Some(2));
+
+        // A recorded backup that's since been moved is no backup at all.
+        std::fs::remove_file(&outcome.archive_path).unwrap();
+        assert_eq!(changed_since_backup(&settings, &scan::scan_settings(&settings)), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

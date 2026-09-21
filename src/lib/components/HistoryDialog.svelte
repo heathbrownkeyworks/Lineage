@@ -1,6 +1,7 @@
 <script lang="ts">
   import { X, RotateCcw, RefreshCw } from "lucide-svelte";
   import { listSnapshots, restoreSnapshot, formatSize, formatWhen } from "$lib/tauri";
+  import { bumpPresets } from "$lib/stores/app.svelte";
   import type { RestoreReport, SnapshotInfo } from "$lib/types";
 
   type Props = { open?: boolean };
@@ -41,6 +42,7 @@
     error = null;
     try {
       const report = await restoreSnapshot(id);
+      bumpPresets();
       results = { ...results, [id]: report };
     } catch (e) {
       error = typeof e === "string" ? e : String(e);

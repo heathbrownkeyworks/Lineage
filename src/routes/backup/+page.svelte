@@ -15,7 +15,7 @@
     formatSize,
     formatWhen,
   } from "$lib/tauri";
-  import { appEvents } from "$lib/stores/app.svelte";
+  import { appEvents, bumpPresets } from "$lib/stores/app.svelte";
   import type {
     BackupArchive,
     BackupEntry,
@@ -56,7 +56,7 @@
     progress = null;
     try {
       outcome = await runBackup((p) => (progress = p));
-      await refresh();
+      bumpPresets();
     } catch (e) {
       error = typeof e === "string" ? e : String(e);
     } finally {
@@ -209,6 +209,7 @@
     const path = inspection.path;
     try {
       restoreOutcome = await restoreBackup(path, [...selected], (p) => (restoreProgress = p));
+      bumpPresets();
       await loadInspection(path);
     } catch (e) {
       restoreError = errorText(e);
@@ -225,6 +226,7 @@
     restoreError = null;
     try {
       undone = await restoreSnapshot(id);
+      bumpPresets();
       await loadInspection(inspection.path);
     } catch (e) {
       restoreError = errorText(e);
@@ -237,6 +239,7 @@
   // or roots may have changed).
   $effect(() => {
     void appEvents.settingsVersion;
+    void appEvents.presetsVersion;
     void refresh();
   });
 </script>
@@ -283,6 +286,16 @@
           {#if status.last_backup_at && status.last_backup_exists}
             <p class="when">{formatWhen(status.last_backup_at)}</p>
             <p class="mono archive" title={status.last_backup_path}>{status.last_backup_path}</p>
+            {#if status.changed_since_backup !== null}
+              <p class="coverage" class:warn={status.changed_since_backup > 0}>
+                {#if status.changed_since_backup === 0}
+                  Covers all {status.file_count} presets on disk.
+                {:else}
+                  {status.changed_since_backup} preset{status.changed_since_backup === 1 ? " has" : "s have"} changed
+                  or been added since — not in this backup.
+                {/if}
+              </p>
+            {/if}
           {:else if status.last_backup_at && !status.last_backup_exists}
             <p class="when warn">
               A backup was recorded on {formatWhen(status.last_backup_at)}, but the archive is no
@@ -918,5 +931,13 @@
     display: flex;
     justify-content: flex-end;
     gap: 10px;
+  }
+  .coverage {
+    margin: 0;
+    font-size: 12px;
+    color: var(--sf-success);
+  }
+  .coverage.warn {
+    color: var(--sf-warning);
   }
 </style>

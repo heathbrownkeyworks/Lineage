@@ -239,3 +239,35 @@ fn real_legacy_backup_maps_onto_the_live_collection() {
     assert!(counts.get("Unmapped").is_none(), "{counts:?}");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// The failure mode that matters for the nudge is a path-normalization
+/// mismatch between the scan and the archive, which would make every preset
+/// look uncovered and nag forever. Against the real legacy backup, only the
+/// handful actually edited since should count.
+#[test]
+fn real_backup_covers_nearly_everything_on_disk() {
+    let archive = Path::new(r"C:\Users\coldsun\Documents\Lineage\Backups\JSLOT-BACKUP-08242026.zip");
+    let tmp = sandbox("nudge");
+    let Some(mut settings) = real_mo2_settings(&tmp) else { return };
+    if !archive.is_file() {
+        return;
+    }
+    let taken = std::fs::metadata(archive)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    settings.last_backup_path = Some(archive.display().to_string());
+    settings.last_backup_at = Some(taken);
+    let scan = scan::scan_settings(&settings);
+    let changed = backup::changed_since_backup(&settings, &scan).expect("the backup is usable");
+    eprintln!("{changed} of {} presets not covered by the real backup", scan.total);
+    assert!(
+        changed * 2 < scan.total,
+        "{changed} of {} uncovered — the scan and the archive disagree on paths",
+        scan.total
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}

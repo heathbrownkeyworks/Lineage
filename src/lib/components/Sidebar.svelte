@@ -3,6 +3,7 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { Search, Archive, Eraser, Layers, BookMarked } from "lucide-svelte";
+  import { backupNudge, uncoveredCount } from "$lib/stores/app.svelte";
 
   const items = [
     { href: "/find", label: "Find Assets", Icon: Search },
@@ -23,6 +24,9 @@
     }
   });
 
+  /** Stays after the banner is dismissed — the quiet, persistent reminder. */
+  const backupUncovered = $derived(uncoveredCount(backupNudge.status));
+
   function isActive(href: string): boolean {
     return page.url.pathname.startsWith(href);
   }
@@ -42,6 +46,12 @@
       >
         <span class="nav-icon"><Icon size={15} strokeWidth={1.6} /></span>
         <span>{item.label}</span>
+        {#if item.href === "/backup" && backupUncovered > 0}
+          <span
+            class="nav-dot"
+            title={`${backupUncovered} preset${backupUncovered === 1 ? " isn't" : "s aren't"} covered by your last backup`}
+          ></span>
+        {/if}
       </button>
     {/each}
   </nav>
@@ -139,5 +149,12 @@
     font-size: 10px;
     letter-spacing: 0.1em;
     color: var(--sf-text-off);
+  }
+  .nav-dot {
+    margin-left: auto;
+    width: 7px;
+    height: 7px;
+    border-radius: var(--sf-r-full);
+    background: var(--sf-warning);
   }
 </style>

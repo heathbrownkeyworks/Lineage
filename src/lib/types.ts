@@ -94,6 +94,9 @@ export type BackupStatus = {
   last_backup_at: number | null;
   last_backup_path: string | null;
   last_backup_exists: boolean;
+  /** Presets on disk the last backup doesn't cover; null when there's no
+   *  usable backup. */
+  changed_since_backup: number | null;
 };
 
 export type BackupProgress = {

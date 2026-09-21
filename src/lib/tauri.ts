@@ -222,6 +222,14 @@ export function formatSize(bytes: number): string {
 }
 
 /** Local date + time from unix seconds. */
+/** "today", "yesterday", "27 days ago" — how stale something is. */
+export function formatAgo(unixSeconds: number): string {
+  const days = Math.floor((Date.now() / 1000 - unixSeconds) / 86400);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return `${days} days ago`;
+}
+
 export function formatWhen(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleString(undefined, {
     year: "numeric",

@@ -196,6 +196,19 @@ normalized. This is the only unavoidable reformatting case found.
   only when their folder still exists — a vanished folder under an MO2 root
   is a removed mod, and recreating it would conjure a mod MO2 never
   installed (same rule as snapshot restore).
+- **The backup nudge counts coverage, not age.** An old backup of presets
+  nobody has touched is still complete, so age alone would just nag.
+  `backup::changed_since_backup` counts presets on disk the last backup
+  doesn't cover: ones absent from the archive, plus ones modified after it.
+  Membership is by the archive's contents, never timestamps — MO2 keeps a
+  file's original mtime when it installs from an archive, so a preset pack
+  installed today can look years older than the backup. Deleted presets
+  don't count (the backup still has them), and neither do presets in mods
+  disabled since the backup (the scan only walks enabled mods). Every page
+  that writes presets or makes a backup calls `bumpPresets()` so the banner
+  and the sidebar dot never go stale mid-session; "Not now" lasts for the
+  session only, because a nudge that could be silenced for good would stop
+  being a safety net.
 - **Vanilla skin textures are never requirements.** `faceTextures` records the
   head TextureSet slots and `tintInfo` the vanilla tint masks, so nearly every
   preset references `Actors\Character\<Race>\FemaleHead*.dds` and

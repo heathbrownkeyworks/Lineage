@@ -221,6 +221,25 @@ fn manifest_index(manifest: &Option<BackupManifest>) -> Option<HashMap<&str, &Ma
         .map(|m| m.entries.iter().map(|e| (e.entry.as_str(), e)).collect())
 }
 
+/// Where every preset in an archive would restore to, lowercased — the set of
+/// on-disk presets this backup covers. Reads only the zip's directory and the
+/// manifest, never the presets themselves, so it's cheap enough to run on
+/// every backup-status check.
+pub(crate) fn archived_targets(
+    settings: &AppSettings,
+    path: &Path,
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut archive = open(path)?;
+    let manifest = read_manifest(&mut archive);
+    let index = manifest_index(&manifest);
+    Ok(archive
+        .file_names()
+        .filter(|n| is_jslot(n))
+        .filter_map(|n| target_for(n, index.as_ref(), &settings.jslot_roots))
+        .map(|(target, _, _)| target.display().to_string().to_ascii_lowercase())
+        .collect())
+}
+
 /// Every `JSLOT-BACKUP-*.zip` in `dir`, newest first.
 pub fn list_archives(dir: &Path) -> Vec<BackupArchive> {
     let Ok(read) = std::fs::read_dir(dir) else {

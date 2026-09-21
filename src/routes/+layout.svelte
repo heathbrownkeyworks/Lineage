@@ -3,8 +3,18 @@
   import { page } from "$app/state";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import TitleBar from "$lib/components/TitleBar.svelte";
+  import BackupNudge from "$lib/components/BackupNudge.svelte";
+  import { appEvents, refreshBackupNudge } from "$lib/stores/app.svelte";
 
   let { children } = $props();
+
+  // Checked at launch, and again whenever settings change or anything
+  // writes presets or makes a backup.
+  $effect(() => {
+    void appEvents.settingsVersion;
+    void appEvents.presetsVersion;
+    void refreshBackupNudge();
+  });
 </script>
 
 <div class="app-shell">
@@ -12,6 +22,7 @@
   <div class="body">
     <Sidebar />
     <main class="page">
+      <BackupNudge />
       <!-- Route transition: opacity only — a translate here briefly
            overflows the scrollport and flashes a scrollbar (Visage lesson). -->
       {#key page.url.pathname}
