@@ -51,6 +51,9 @@
   let packProgress = $state<PackProgress | null>(null);
   let packed = $state<PackOutcome | null>(null);
   let packError = $state<string | null>(null);
+  /** A folder's presets are being listed — the selection is about to change. */
+  let listing = $state(false);
+  const busy = $derived(building || packing || listing);
 
   const includedCount = $derived(
     report ? report.requirements.filter((r) => !excluded.has(r.key)).length : 0,
@@ -74,6 +77,7 @@
     error = null;
     const folder = await openDialog({ directory: true, multiple: false });
     if (typeof folder !== "string") return;
+    listing = true;
     try {
       const found = await listPresetsIn(folder);
       if (found.length === 0) error = `No .jslot presets under ${folder}.`;
@@ -83,6 +87,8 @@
       }
     } catch (e) {
       error = errorText(e);
+    } finally {
+      listing = false;
     }
   }
 
@@ -214,17 +220,17 @@
     <div class="row-head">
       <h2 class="sf-label">Presets in the pack</h2>
       <div class="pick">
-        <button type="button" class="btn btn-ghost btn-sm" disabled={building || packing} onclick={pickFolder}>
+        <button type="button" class="btn btn-ghost btn-sm" disabled={busy} onclick={pickFolder}>
           <FolderOpen size={13} /> Pick a folder…
         </button>
-        <button type="button" class="btn btn-ghost btn-sm" disabled={building || packing} onclick={pickFiles}>
+        <button type="button" class="btn btn-ghost btn-sm" disabled={busy} onclick={pickFiles}>
           <FilePlus size={13} /> Add presets…
         </button>
         {#if chosen.length > 0}
           <button
             type="button"
             class="btn btn-ghost btn-sm"
-            disabled={building || packing}
+            disabled={busy}
             onclick={() => {
               setChosen([]);
               pickedFolder = null;
@@ -252,7 +258,7 @@
                 type="button"
                 class="icon-btn"
                 aria-label={`Remove ${fileName(p)}`}
-                disabled={building || packing}
+                disabled={busy}
                 onclick={() => setChosen(chosen.filter((c) => c !== p))}
               >
                 <X size={12} />
@@ -265,10 +271,11 @@
         <input
           type="checkbox"
           bind:checked={asShipped}
-          disabled={building || packing}
+          disabled={busy}
           onchange={() => {
             report = null;
             packed = null;
+            packError = null;
           }}
         />
         <span>
@@ -277,7 +284,7 @@
           aren't changed.
         </span>
       </label>
-      <button type="button" class="btn btn-primary" disabled={building || packing} onclick={build}>
+      <button type="button" class="btn btn-primary" disabled={busy} onclick={build}>
         <ListChecks size={14} /> Build requirements
       </button>
     {/if}
@@ -418,18 +425,29 @@
             placeholder="None — straight into Presets\"
             bind:value={subfolder}
             disabled={packing}
-            oninput={() => (packed = null)}
+            oninput={() => {
+              packed = null;
+              packError = null;
+            }}
           />
         </label>
         <label class="check">
-          <input type="checkbox" bind:checked={headExports} disabled={packing} onchange={() => (packed = null)} />
+          <input
+            type="checkbox"
+            bind:checked={headExports}
+            disabled={packing}
+            onchange={() => {
+              packed = null;
+              packError = null;
+            }}
+          />
           <span>
             Include each preset's head export — the <span class="mono">.nif</span> and
             <span class="mono">.dds</span> of the same name beside its Presets folder
           </span>
         </label>
       </div>
-      <button type="button" class="btn btn-primary" disabled={packing || building} onclick={savePack}>
+      <button type="button" class="btn btn-primary" disabled={busy} onclick={savePack}>
         <Package size={14} /> Save pack…
       </button>
       {#if packing}

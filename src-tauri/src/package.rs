@@ -307,6 +307,21 @@ fn verify(tmp: &Path, entries: &[Entry], categories: &[CleanCategory]) -> Result
     Ok(())
 }
 
+/// The half-written zip. Removed when dropped — on an error, and on a panic
+/// mid-pack — unless the finished zip was renamed into place.
+struct Partial {
+    path: PathBuf,
+    kept: bool,
+}
+
+impl Drop for Partial {
+    fn drop(&mut self) {
+        if !self.kept {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 pub fn build_pack(
     paths: &[String],
     categories: &[CleanCategory],
@@ -322,15 +337,14 @@ pub fn build_pack(
     let (Some(dir), Some(file_name)) = (dest.parent(), dest.file_name()) else {
         return Err(format!("{} isn't somewhere a file can be saved.", dest.display()));
     };
-    let tmp = dir.join(format!(".{}.lineage-partial", file_name.to_string_lossy()));
-    let result = write_pack(&entries, categories, &tmp, progress).and_then(|cleaned| {
-        verify(&tmp, &entries, categories)?;
-        std::fs::rename(&tmp, dest).map_err(|e| format!("Couldn't save {} ({e})", dest.display()))?;
-        Ok(cleaned)
-    });
-    let cleaned = result.inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })?;
+    let mut tmp = Partial {
+        path: dir.join(format!(".{}.lineage-partial", file_name.to_string_lossy())),
+        kept: false,
+    };
+    let cleaned = write_pack(&entries, categories, &tmp.path, progress)?;
+    verify(&tmp.path, &entries, categories)?;
+    std::fs::rename(&tmp.path, dest).map_err(|e| format!("Couldn't save {} ({e})", dest.display()))?;
+    tmp.kept = true;
     let count = |kind| entries.iter().filter(|e| e.kind == kind).count();
     Ok(PackOutcome {
         path: dest.display().to_string(),
