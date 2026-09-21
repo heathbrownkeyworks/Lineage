@@ -304,6 +304,23 @@ normalized. This is the only unavoidable reformatting case found.
   makeup: Oldrim mod 72955, recorded as SSE 72955 with an empty `url=`), so
   a URL built from it points at an unrelated SSE page. Only a *user* library
   entry beats `meta.ini`; seed entries only fill gaps.
+- **The release packager shares the Requirements page's selection.**
+  [package.rs](src-tauri/src/package.rs) zips the same presets with the
+  same clean categories the Requirements list was built from, so the Nexus
+  page can't describe a different pack from the zip. A preset's zip path is
+  `SKSE/Plugins/CharGen/Presets/` + whatever follows the last
+  `CharGen\Presets` in its source path (Miggyluv's `Female\`/`Male\`,
+  Anuketh's `[Anuketh Presets]\` survive); anything else goes in by name.
+  Head exports are `<name>.nif`/`.dds` in the CharGen folder holding that
+  Presets folder: 24 of 40 installed preset mods ship them, 1,105 of 1,350
+  ColdSun presets have one. They average ~31 MB (uncompressed 2K/4K tint
+  masks), so they're streamed into the zip, and a whole-collection pack
+  with them would run to tens of GB. Two different files on one zip path
+  refuse the pack rather than overwrite: ColdSun's own collection has
+  `CharGen\Exported\Colson.jslot` beside `Presets\Colson.jslot`. The zip is
+  written beside its destination as a `.lineage-partial`, reopened and
+  checked (entry list, every preset parses, no chosen category left), then
+  renamed. Real run: 1,327 of 1,350 ColdSun presets had something to clean.
 - **Precedence rule: user > automatic > seed.** A manual library entry
   (kind, match_type, pattern — the "shadow key") always wins over a seed
   entry covering the same pattern; the shadowed seed entry is marked

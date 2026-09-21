@@ -335,3 +335,83 @@ fn real_pack_requirements_render_in_the_house_style() {
     assert!(before == after, "a preset on disk changed");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Pack real presets: all of ColdSun's Face Presets cleaned, a small pack
+/// with its head exports, and subfolder packs (Anuketh's named folder,
+/// Miggyluv's Female/Male). Every pack is verified by build_pack itself;
+/// here the layout is checked and no source file may change.
+#[test]
+fn real_packs_build_verify_and_leave_sources_alone() {
+    use lineage_lib::clean::CleanCategory::*;
+    use lineage_lib::package;
+    use lineage_lib::requirements;
+    let chargen = Path::new(MODS).join(r"ColdSun's Face Presets\SKSE\Plugins\CharGen");
+    let anuketh = Path::new(MODS).join("Anuketh's NPC Replacer Presets AIO - All in One");
+    let miggy = Path::new(MODS).join("Miggyluv's Nord Presets (Vol.1)");
+    if !chargen.is_dir() || !anuketh.is_dir() || !miggy.is_dir() {
+        return;
+    }
+    let tmp = sandbox("package");
+    let defaults = [BodyMorphs, BodyOverlays, Skeleton, WeaponCamera];
+    let stamp = |p: &Path| {
+        let m = std::fs::metadata(p).unwrap();
+        (m.len(), m.modified().unwrap())
+    };
+    let names = |zip_path: &Path| -> Vec<String> {
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(zip_path).unwrap()).unwrap();
+        (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().to_string()).collect()
+    };
+
+    // 1. The whole collection, as it would ship.
+    let all = requirements::presets_in(&chargen.join("Presets")).unwrap();
+    let before: Vec<Vec<u8>> = all.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    let out = package::build_pack(&all, &defaults, None, false, &tmp.join("all.zip"), &mut |_| {}).unwrap();
+    assert_eq!(out.presets, all.len());
+    assert!(out.cleaned > 0, "some of the collection carries body or placement data");
+    let after: Vec<Vec<u8>> = all.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    assert!(before == after, "a preset on disk changed");
+    eprintln!("collection: {} presets, {} cleaned", out.presets, out.cleaned);
+
+    // 2. The three presets with the smallest head exports, exports included.
+    let head_size = |p: &String| -> u64 {
+        let stem = Path::new(p).file_stem().unwrap().to_string_lossy().into_owned();
+        ["nif", "dds"]
+            .iter()
+            .filter_map(|ext| std::fs::metadata(chargen.join(format!("{stem}.{ext}"))).ok())
+            .map(|m| m.len())
+            .sum()
+    };
+    let mut with_heads: Vec<(u64, String)> =
+        all.iter().map(|p| (head_size(p), p.clone())).filter(|(size, _)| *size > 0).collect();
+    with_heads.sort();
+    let small: Vec<String> = with_heads.into_iter().take(3).map(|(_, p)| p).collect();
+    let heads: Vec<PathBuf> = small
+        .iter()
+        .flat_map(|p| {
+            let stem = Path::new(p).file_stem().unwrap().to_string_lossy().into_owned();
+            ["nif", "dds"].map(|ext| chargen.join(format!("{stem}.{ext}")))
+        })
+        .filter(|p| p.is_file())
+        .collect();
+    let head_stamps: Vec<_> = heads.iter().map(|p| stamp(p)).collect();
+    let out = package::build_pack(&small, &defaults, None, true, &tmp.join("heads.zip"), &mut |_| {}).unwrap();
+    assert_eq!((out.presets, out.head_exports), (3, heads.len()));
+    let packed = names(&tmp.join("heads.zip"));
+    for h in &heads {
+        let entry = format!("SKSE/Plugins/CharGen/{}", h.file_name().unwrap().to_string_lossy());
+        assert!(packed.contains(&entry), "{entry} missing from {packed:?}");
+    }
+    assert_eq!(heads.iter().map(|p| stamp(p)).collect::<Vec<_>>(), head_stamps);
+
+    // 3. Subfolders survive: Anuketh's named folder, Miggyluv's Female/Male.
+    let mut sub = requirements::presets_in(&anuketh).unwrap();
+    sub.extend(requirements::presets_in(&miggy).unwrap());
+    let out = package::build_pack(&sub, &defaults, None, true, &tmp.join("sub.zip"), &mut |_| {}).unwrap();
+    assert_eq!(out.presets, sub.len());
+    let packed = names(&tmp.join("sub.zip"));
+    assert!(packed.iter().any(|n| n.starts_with("SKSE/Plugins/CharGen/Presets/[Anuketh Presets]/")));
+    assert!(packed.iter().any(|n| n.starts_with("SKSE/Plugins/CharGen/Presets/Female/")));
+    assert!(packed.iter().any(|n| n.starts_with("SKSE/Plugins/CharGen/Presets/Male/")));
+    eprintln!("subfolders: {} presets, {} cleaned, {} head exports", out.presets, out.cleaned, out.head_exports);
+    let _ = std::fs::remove_dir_all(&tmp);
+}

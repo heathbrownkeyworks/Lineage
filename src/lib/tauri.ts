@@ -26,6 +26,8 @@ import type {
   Mo2ProfileOption,
   MergedEntry,
   NexusValidation,
+  PackOutcome,
+  PackProgress,
   PresetInspection,
   RateLimitInfo,
   RenderLine,
@@ -190,6 +192,26 @@ export async function renderRequirements(
   header: boolean,
 ): Promise<string> {
   return await invoke<string>("render_requirements", { lines, total, format, header });
+}
+
+export async function packRelease(
+  paths: string[],
+  categories: CleanCategory[],
+  subfolder: string,
+  includeHeadExports: boolean,
+  dest: string,
+  onProgress?: (p: PackProgress) => void,
+): Promise<PackOutcome> {
+  const channel = new Channel<PackProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return await invoke<PackOutcome>("pack_release", {
+    paths,
+    categories,
+    subfolder: subfolder.trim() || null,
+    includeHeadExports,
+    dest,
+    onProgress: channel,
+  });
 }
 
 // ---- nexus ----------------------------------------------------------------

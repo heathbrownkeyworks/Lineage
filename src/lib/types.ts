@@ -297,6 +297,20 @@ export type RenderLine = {
   used_by: number;
 };
 
+export type PackProgress = {
+  current: number;
+  total: number;
+  name: string;
+};
+
+export type PackOutcome = {
+  path: string;
+  presets: number;
+  /** Presets that had something cleaned out of them. */
+  cleaned: number;
+  head_exports: number;
+};
+
 /** Nexus API key validation result. */
 export type NexusValidation = {
   name: string;

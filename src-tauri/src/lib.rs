@@ -8,6 +8,7 @@ pub mod jslot;
 pub mod library;
 pub mod nexus;
 pub mod ops;
+pub mod package;
 pub mod rawjson;
 pub mod requirements;
 pub mod restore;
@@ -102,6 +103,7 @@ pub fn run() {
             requirements::list_presets_in,
             requirements::requirements_for,
             requirements::render_requirements,
+            package::pack_release,
             library::library_list,
             library::library_save_entries,
             library::library_delete_entry,

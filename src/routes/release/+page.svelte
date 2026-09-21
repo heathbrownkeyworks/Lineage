@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { FolderOpen, FilePlus, ListChecks, Copy, Check, X } from "lucide-svelte";
+  import { FolderOpen, FilePlus, ListChecks, Copy, Check, X, Package, CheckCircle2 } from "lucide-svelte";
   import { goto } from "$app/navigation";
-  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+  import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
-  import { listPresetsIn, requirementsFor, renderRequirements } from "$lib/tauri";
+  import { listPresetsIn, requirementsFor, renderRequirements, packRelease } from "$lib/tauri";
   import { DEFAULT_CATEGORIES, categoryLabel } from "$lib/clean";
-  import type { ExportFormat, FindProgress, RequirementsReport } from "$lib/types";
+  import type { ExportFormat, FindProgress, PackOutcome, PackProgress, RequirementsReport } from "$lib/types";
 
   const FORMATS: { id: ExportFormat; label: string }[] = [
     { id: "bbcode", label: "Nexus BBCode" },
@@ -15,6 +16,8 @@
   ];
   const cleanedAway = DEFAULT_CATEGORIES.map((c) => categoryLabel(c).toLowerCase()).join(", ");
   const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
+  /** The SKSE\Plugins\CharGen\Presets part of a path isn't a name. */
+  const LAYOUT_FOLDERS = new Set(["skse", "plugins", "chargen", "presets"]);
   const errorText = (e: unknown) => (typeof e === "string" ? e : String(e));
   /** Where a link goes — enough to spot a Patreon or an Oldrim page. */
   function host(url: string): string {
@@ -40,6 +43,14 @@
   let preview = $state("");
   let copied = $state(false);
   let error = $state<string | null>(null);
+  /** The last folder picked — names the zip. */
+  let pickedFolder = $state<string | null>(null);
+  let subfolder = $state("");
+  let headExports = $state(true);
+  let packing = $state(false);
+  let packProgress = $state<PackProgress | null>(null);
+  let packed = $state<PackOutcome | null>(null);
+  let packError = $state<string | null>(null);
 
   const includedCount = $derived(
     report ? report.requirements.filter((r) => !excluded.has(r.key)).length : 0,
@@ -50,6 +61,8 @@
     chosen = paths;
     report = null;
     excluded = new Set();
+    packed = null;
+    packError = null;
   }
 
   function addPaths(paths: string[]) {
@@ -64,7 +77,10 @@
     try {
       const found = await listPresetsIn(folder);
       if (found.length === 0) error = `No .jslot presets under ${folder}.`;
-      else addPaths(found);
+      else {
+        addPaths(found);
+        pickedFolder = folder;
+      }
     } catch (e) {
       error = errorText(e);
     }
@@ -139,6 +155,48 @@
     }
   }
 
+  /** The mod's name: the folder picked (or the first preset's), minus any
+   *  SKSE\Plugins\CharGen\Presets on the end. */
+  function packName(): string {
+    const from = pickedFolder ?? chosen[0]?.replace(/[\\/][^\\/]*$/, "") ?? "";
+    const parts = from.split(/[\\/]/).filter(Boolean);
+    while (parts.length > 1 && LAYOUT_FOLDERS.has(parts[parts.length - 1].toLowerCase())) parts.pop();
+    return parts[parts.length - 1] ?? "Presets";
+  }
+
+  async function savePack() {
+    packError = null;
+    packed = null;
+    const dest = await saveDialog({
+      defaultPath: `${packName()}.zip`,
+      filters: [{ name: "Zip archive", extensions: ["zip"] }],
+    });
+    if (typeof dest !== "string") return;
+    packing = true;
+    packProgress = null;
+    try {
+      packed = await packRelease(
+        chosen,
+        asShipped ? DEFAULT_CATEGORIES : [],
+        subfolder,
+        headExports,
+        dest,
+        (p) => (packProgress = p),
+      );
+    } catch (e) {
+      packError = errorText(e);
+    } finally {
+      packing = false;
+      packProgress = null;
+    }
+  }
+
+  async function showInFolder(path: string) {
+    try {
+      await revealItemInDir(path);
+    } catch {}
+  }
+
   function stageLabel(p: FindProgress | null): string {
     if (p?.stage === "nexus") return "Looking mods up on Nexus…";
     if (p?.stage === "resolving") return "Identifying mods…";
@@ -147,8 +205,8 @@
 </script>
 
 <PageHeader
-  title="Requirements"
-  subtitle="Build the Requirements section for a preset pack: every mod its presets need, counted and linked, ready to paste into your Nexus page."
+  title="Release"
+  subtitle="Get a preset pack ready for Nexus: the Requirements section for its page, and the zip players install."
 />
 
 <div class="content">
@@ -156,14 +214,22 @@
     <div class="row-head">
       <h2 class="sf-label">Presets in the pack</h2>
       <div class="pick">
-        <button type="button" class="btn btn-ghost btn-sm" disabled={building} onclick={pickFolder}>
+        <button type="button" class="btn btn-ghost btn-sm" disabled={building || packing} onclick={pickFolder}>
           <FolderOpen size={13} /> Pick a folder…
         </button>
-        <button type="button" class="btn btn-ghost btn-sm" disabled={building} onclick={pickFiles}>
+        <button type="button" class="btn btn-ghost btn-sm" disabled={building || packing} onclick={pickFiles}>
           <FilePlus size={13} /> Add presets…
         </button>
         {#if chosen.length > 0}
-          <button type="button" class="btn btn-ghost btn-sm" disabled={building} onclick={() => setChosen([])}>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            disabled={building || packing}
+            onclick={() => {
+              setChosen([]);
+              pickedFolder = null;
+            }}
+          >
             Clear
           </button>
         {/if}
@@ -186,7 +252,7 @@
                 type="button"
                 class="icon-btn"
                 aria-label={`Remove ${fileName(p)}`}
-                disabled={building}
+                disabled={building || packing}
                 onclick={() => setChosen(chosen.filter((c) => c !== p))}
               >
                 <X size={12} />
@@ -199,15 +265,19 @@
         <input
           type="checkbox"
           bind:checked={asShipped}
-          disabled={building}
-          onchange={() => (report = null)}
+          disabled={building || packing}
+          onchange={() => {
+            report = null;
+            packed = null;
+          }}
         />
         <span>
-          As they'll ship after Clean Preset — {cleanedAway} are removed first, in memory, so a mod
-          only that data used isn't listed. Your preset files aren't changed.
+          As they'll ship after Clean Preset — {cleanedAway} are removed first, in memory, so the
+          list skips mods only that data used and the pack holds cleaned copies. Your preset files
+          aren't changed.
         </span>
       </label>
-      <button type="button" class="btn btn-primary" disabled={building} onclick={build}>
+      <button type="button" class="btn btn-primary" disabled={building || packing} onclick={build}>
         <ListChecks size={14} /> Build requirements
       </button>
     {/if}
@@ -331,6 +401,67 @@
         <pre class="out-text">{preview}</pre>
       </section>
     </div>
+  {/if}
+
+  {#if chosen.length > 0}
+    <section class="sf-card pad pack">
+      <h2 class="sf-label">Pack</h2>
+      <p class="quiet">
+        The zip players install: presets under <span class="mono">SKSE\Plugins\CharGen\Presets\</span
+        >{asShipped ? ", cleaned as above" : ", exactly as they are"}. Your files are only read.
+      </p>
+      <div class="pack-options">
+        <label class="field">
+          <span class="field-label">Folder inside Presets</span>
+          <input
+            class="input"
+            placeholder="None — straight into Presets\"
+            bind:value={subfolder}
+            disabled={packing}
+            oninput={() => (packed = null)}
+          />
+        </label>
+        <label class="check">
+          <input type="checkbox" bind:checked={headExports} disabled={packing} onchange={() => (packed = null)} />
+          <span>
+            Include each preset's head export — the <span class="mono">.nif</span> and
+            <span class="mono">.dds</span> of the same name beside its Presets folder
+          </span>
+        </label>
+      </div>
+      <button type="button" class="btn btn-primary" disabled={packing || building} onclick={savePack}>
+        <Package size={14} /> Save pack…
+      </button>
+      {#if packing}
+        <div class="pack-progress">
+          <ProgressBar
+            current={packProgress?.current ?? 0}
+            total={packProgress?.total ?? 0}
+            label={packProgress?.name ?? "Starting…"}
+          />
+        </div>
+      {/if}
+      {#if packError}
+        <div class="note note-danger pack-error">{packError}</div>
+      {/if}
+      {#if packed}
+        <div class="note note-success pack-done">
+          <CheckCircle2 size={15} />
+          <div>
+            <p>
+              Packed {packed.presets} preset{packed.presets === 1 ? "" : "s"}{packed.cleaned > 0
+                ? ` (${packed.cleaned} cleaned)`
+                : ""}{packed.head_exports > 0
+                ? ` and ${packed.head_exports} head export file${packed.head_exports === 1 ? "" : "s"}`
+                : ""} into <span class="mono">{fileName(packed.path)}</span>, checked after writing.
+            </p>
+            <button type="button" class="btn btn-ghost btn-sm" onclick={() => showInFolder(packed!.path)}>
+              <FolderOpen size={13} /> Show in folder
+            </button>
+          </div>
+        </div>
+      {/if}
+    </section>
   {/if}
 </div>
 
@@ -546,6 +677,51 @@
   }
   .copy {
     margin-left: auto;
+  }
+  .pack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .pack h2 {
+    margin: 0;
+  }
+  .pack-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    max-width: 320px;
+  }
+  .field-label {
+    font-size: 12px;
+    color: var(--sf-text-2);
+  }
+  .pack-progress {
+    width: 100%;
+  }
+  .pack-error {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .pack-done {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .pack-done p {
+    margin: 0 0 8px;
   }
   .out-text {
     margin: 0;

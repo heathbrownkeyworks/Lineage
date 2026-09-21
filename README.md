@@ -20,6 +20,10 @@ A RaceMenu `.jslot` preset utility by **ColdSun Creative**.
   Review fall back on when Nexus can't resolve a reference. Ships with a
   curated seed list; every correction or addition you make is saved to your
   own `library.json` and takes precedence over the built-in entries.
+- **Release** — for preset authors: the Nexus Requirements section for a
+  pack (every mod its presets need, counted and linked, in Nexus BBCode,
+  Markdown or plain text) and the zip players install, with the presets
+  cleaned the same way and each preset's head export beside it.
 
 Lineage never writes anything into your mod folders except the modified
 preset itself — no `.bak` files, no stray temp files. Every destructive
