@@ -111,7 +111,7 @@ pub fn run() {
             readiness::readiness_sweep,
             compare::compare_presets,
             compare::find_duplicate_presets,
-            compare::remove_presets,
+            compare::remove_duplicates,
             library::library_list,
             library::library_save_entries,
             library::library_delete_entry,

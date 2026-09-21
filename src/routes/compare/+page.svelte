@@ -3,7 +3,7 @@
   import PageHeader from "$lib/components/PageHeader.svelte";
   import PresetPicker from "$lib/components/PresetPicker.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
-  import { comparePresets, findDuplicatePresets, removePresets } from "$lib/tauri";
+  import { comparePresets, findDuplicatePresets, removeDuplicates } from "$lib/tauri";
   import { bumpPresets } from "$lib/stores/app.svelte";
   import type {
     CompareProgress,
@@ -55,10 +55,13 @@
     }
   }
 
-  /** At least one preset in every group stays. */
-  function canMark(group: DuplicateGroup, path: string): boolean {
-    if (marked.has(path)) return true;
-    return group.presets.filter((p) => !marked.has(p.path)).length > 1;
+  /** At least one preset stays in every group — and a file can sit in both
+   *  an exact group and a same-face group, so every group it's in counts. */
+  function canMark(path: string): boolean {
+    if (marked.has(path) || !dupes) return true;
+    return [...dupes.exact, ...dupes.same_face]
+      .filter((g) => g.presets.some((p) => p.path === path))
+      .every((g) => g.presets.filter((p) => !marked.has(p.path)).length > 1);
   }
 
   function toggleMark(path: string) {
@@ -77,7 +80,13 @@
     removing = true;
     dupesError = null;
     try {
-      const outcome = await removePresets([...marked]);
+      const groups = dupes
+        ? [
+            ...dupes.exact.map((g) => ({ kind: "exact" as const, members: g.presets.map((p) => p.path) })),
+            ...dupes.same_face.map((g) => ({ kind: "same_face" as const, members: g.presets.map((p) => p.path) })),
+          ]
+        : [];
+      const outcome = await removeDuplicates(groups, [...marked]);
       removed = outcome;
       const gone = new Set(outcome.removed);
       const prune = (groups: DuplicateGroup[]) =>
@@ -94,6 +103,11 @@
         };
       }
       marked = new Set([...marked].filter((p) => !gone.has(p)));
+      if ((left && gone.has(left)) || (right && gone.has(right))) {
+        if (left && gone.has(left)) left = null;
+        if (right && gone.has(right)) right = null;
+        comparison = null;
+      }
       bumpPresets();
     } catch (e) {
       dupesError = errorText(e);
@@ -163,7 +177,7 @@
             <input
               type="checkbox"
               checked={marked.has(p.path)}
-              disabled={removing || !canMark(g, p.path)}
+              disabled={removing || !canMark(p.path)}
               onchange={() => toggleMark(p.path)}
             />
             <span class="name">{p.file_name}</span>

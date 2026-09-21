@@ -15,10 +15,10 @@ use crate::scan;
 use crate::settings;
 use crate::snapshot::{self, FailedFile};
 use md5::{Digest, Md5};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
@@ -201,6 +201,17 @@ fn sorted_values(values: &[Value]) -> Vec<Value> {
 fn facts(preset: &Value, with_vertices: bool) -> Facts {
     let mut out = Facts::new();
 
+    // Load-order index → plugin, for head parts saved with only a formId:
+    // the raw id means nothing without it (0D043C55 is a different hair in
+    // every load order).
+    let plugins: HashMap<u64, &str> = preset
+        .get("mods")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| Some((m.get("index")?.as_u64()?, m.get("name")?.as_str()?)))
+        .collect();
+
     // Head parts, by type. Several of one type (scars, misc) are one fact.
     let mut by_type: BTreeMap<(u32, String), Vec<String>> = BTreeMap::new();
     for p in preset.get("headParts").and_then(Value::as_array).into_iter().flatten() {
@@ -213,7 +224,13 @@ fn facts(preset: &Value, with_vertices: bool) -> Facts {
             .get("formIdentifier")
             .and_then(Value::as_str)
             .map(str::to_string)
-            .or_else(|| p.get("formId").and_then(Value::as_u64).map(|id| format!("{id:08X}")))
+            .or_else(|| {
+                let id = p.get("formId").and_then(Value::as_u64)?;
+                Some(match plugins.get(&(id >> 24)) {
+                    Some(plugin) => format!("{plugin}|{:06X}", id & 0xFF_FFFF),
+                    None => format!("{id:08X}"),
+                })
+            })
             .unwrap_or_default();
         by_type.entry((t.min(u32::MAX as u64) as u32, name)).or_default().push(ident);
     }
@@ -276,13 +293,25 @@ fn facts(preset: &Value, with_vertices: bool) -> Facts {
             })
             .collect();
         vertices.sort_unstable();
-        let identity = vertices
-            .iter()
-            .map(|(i, o)| format!("{i}:{},{},{}", o[0], o[1], o[2]))
-            .collect::<Vec<_>>()
-            .join(";");
+        // The full host path is part of what's equal: two .tri files can
+        // share a name in different folders.
+        let identity = format!(
+            "{}|{}",
+            host.to_lowercase().replace('/', "\\"),
+            vertices
+                .iter()
+                .map(|(i, o)| format!("{i}:{},{},{}", o[0], o[1], o[2]))
+                .collect::<Vec<_>>()
+                .join(";")
+        );
+        let mut key = file_name(host).to_string();
+        let mut n = 1;
+        while out.contains_key(&(Section::Sculpt, 0, key.clone())) {
+            n += 1;
+            key = format!("{} ({n})", file_name(host));
+        }
         out.insert(
-            (Section::Sculpt, 0, file_name(host).to_string()),
+            (Section::Sculpt, 0, key),
             Fact {
                 display: format!("{} vertices moved", vertices.len()),
                 identity,
@@ -303,7 +332,16 @@ fn facts(preset: &Value, with_vertices: bool) -> Facts {
         if out.contains_key(&(Section::Tints, 0, key.clone())) {
             key = format!("{key} ({})", t.get("index").and_then(Value::as_u64).unwrap_or(0));
         }
-        put(&mut out, Section::Tints, 0, key, fmt_argb(color));
+        let display = fmt_argb(color);
+        out.insert(
+            (Section::Tints, 0, key),
+            Fact {
+                // Masks with one name in different folders aren't the same mask.
+                identity: format!("{}|{display}", texture.to_lowercase().replace('/', "\\")),
+                display,
+                vertices: None,
+            },
+        );
     }
 
     for t in preset.get("faceTextures").and_then(Value::as_array).into_iter().flatten() {
@@ -682,10 +720,17 @@ pub fn find_duplicates(paths: &[String], progress: &mut dyn FnMut(CompareProgres
             }
         }
     }
-    pairs.sort_by(|x, y| {
-        x.0.cmp(&y.0)
-            .then_with(|| file_name(&paths[x.1]).to_lowercase().cmp(&file_name(&paths[y.1]).to_lowercase()))
-    });
+    // Fully ordered, so which pairs make the cap never depends on hashing.
+    let order = |p: &(usize, usize, usize)| {
+        (
+            p.0,
+            file_name(&paths[p.1]).to_lowercase(),
+            file_name(&paths[p.2]).to_lowercase(),
+            paths[p.1].clone(),
+            paths[p.2].clone(),
+        )
+    };
+    pairs.sort_by_key(order);
     pairs.truncate(NEAR_TWIN_CAP);
     let near_twins = pairs
         .into_iter()
@@ -724,18 +769,111 @@ pub struct RemoveOutcome {
     pub failed: Vec<FailedFile>,
 }
 
-/// Remove presets after snapshotting them, so History can put them back.
-pub fn remove_presets_in(settings: &settings::AppSettings, paths: &[String]) -> Result<RemoveOutcome, String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupKind {
+    Exact,
+    SameFace,
+}
+
+/// A group as the page showed it, so removal can be checked against it.
+#[derive(Debug, Deserialize)]
+pub struct RemovalGroup {
+    pub kind: GroupKind,
+    pub members: Vec<String>,
+}
+
+/// A file as it is right now: where it really lives, its bytes, its face.
+struct Current {
+    real: PathBuf,
+    bytes: [u8; 16],
+    face: u64,
+}
+
+fn current(path: &str) -> Option<Current> {
+    let real = std::fs::canonicalize(path).ok()?;
+    let (bytes, value) = read_preset(Path::new(path)).ok()?;
+    Some(Current {
+        real,
+        bytes: Md5::digest(&bytes).into(),
+        face: face_identity(&facts(&value, false)),
+    })
+}
+
+/// Remove duplicates after snapshotting them, so History can put them back.
+///
+/// The page's report can be stale (a preset re-saved since the search), and
+/// one file can appear under two path spellings, so nothing is trusted: every
+/// group touched must keep a member, and every file removed must still match,
+/// right now, a kept member that is a different file — identical bytes in an
+/// exact group, the same face in a same-face group. Otherwise nothing is
+/// removed.
+pub fn remove_duplicates_in(
+    settings: &settings::AppSettings,
+    groups: &[RemovalGroup],
+    paths: &[String],
+) -> Result<RemoveOutcome, String> {
     if paths.is_empty() {
         return Err("Nothing chosen to remove.".to_string());
     }
-    let files: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    for f in &files {
+    let removing: HashSet<&str> = paths.iter().map(String::as_str).collect();
+    for p in paths {
+        let f = Path::new(p);
         let is_preset = f.extension().is_some_and(|e| e.eq_ignore_ascii_case("jslot"));
         if !is_preset || !f.is_file() {
-            return Err(format!("{} isn't a preset file, so nothing was removed.", f.display()));
+            return Err(format!("{p} isn't a preset file, so nothing was removed."));
+        }
+        if !groups.iter().any(|g| g.members.contains(p)) {
+            return Err(format!("{p} isn't in a duplicate group, so nothing was removed."));
         }
     }
+    let mut now: HashMap<&str, Option<Current>> = HashMap::new();
+    for g in groups.iter().filter(|g| g.members.iter().any(|m| removing.contains(m.as_str()))) {
+        for m in &g.members {
+            now.entry(m.as_str()).or_insert_with(|| current(m));
+        }
+    }
+    let mut problems: Vec<String> = Vec::new();
+    for g in groups.iter().filter(|g| g.members.iter().any(|m| removing.contains(m.as_str()))) {
+        let kept: Vec<&Current> = g
+            .members
+            .iter()
+            .filter(|m| !removing.contains(m.as_str()))
+            .filter_map(|m| now[m.as_str()].as_ref())
+            .collect();
+        for r in g.members.iter().filter(|m| removing.contains(m.as_str())) {
+            let Some(gone) = now[r.as_str()].as_ref() else {
+                problems.push(format!("{r} couldn't be read"));
+                continue;
+            };
+            let covered = kept.iter().any(|k| {
+                k.real != gone.real
+                    && match g.kind {
+                        GroupKind::Exact => k.bytes == gone.bytes,
+                        GroupKind::SameFace => k.face == gone.face,
+                    }
+            });
+            if !covered {
+                problems.push(format!("{r} no longer has a matching copy that stays"));
+            }
+        }
+    }
+    if !problems.is_empty() {
+        problems.sort();
+        problems.dedup();
+        return Err(format!(
+            "Nothing was removed. Search again — the presets changed since the last search, or a group would lose every copy:\n{}",
+            problems.join("\n")
+        ));
+    }
+
+    // One file under two spellings is removed (and snapshotted) once.
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let files: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| now.get(p.as_str()).and_then(|c| c.as_ref()).is_none_or(|c| seen.insert(c.real.clone())))
+        .map(PathBuf::from)
+        .collect();
     let meta = snapshot::write_snapshot(settings, "remove-duplicates", &files)?;
     let mut outcome = RemoveOutcome {
         snapshot_id: meta.id,
@@ -781,10 +919,14 @@ pub async fn find_duplicate_presets(
 }
 
 #[tauri::command]
-pub async fn remove_presets(app: tauri::AppHandle, paths: Vec<String>) -> Result<RemoveOutcome, String> {
+pub async fn remove_duplicates(
+    app: tauri::AppHandle,
+    groups: Vec<RemovalGroup>,
+    paths: Vec<String>,
+) -> Result<RemoveOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let settings = settings::load_from_app(&app)?;
-        remove_presets_in(&settings, &paths)
+        remove_duplicates_in(&settings, &groups, &paths)
     })
     .await
     .map_err(|e| format!("remove task failed: {e}"))?
@@ -958,17 +1100,82 @@ mod tests {
     }
 
     #[test]
+    fn head_parts_saved_by_form_id_resolve_through_the_mods_table() {
+        let with_mods = |plugin: &str| {
+            json!({"mods": [{"index": 13, "name": plugin}],
+                   "headParts": [{"formId": 0x0D043C55u64, "type": 3}]})
+        };
+        let hair = |v: &Value| get(&facts(v, false), Section::HeadParts, "Hair").map(str::to_string);
+        assert_eq!(hair(&with_mods("KS Hairdo's.esp")).as_deref(), Some("KS Hairdo's.esp|043C55"));
+        // The same raw id in another load order is another hair.
+        assert_ne!(
+            face_identity(&facts(&with_mods("KS Hairdo's.esp"), false)),
+            face_identity(&facts(&with_mods("HG Hairdos 2.esp"), false))
+        );
+        // And it matches a preset that saved the identifier outright.
+        let named = json!({"headParts": [{"formIdentifier": "KS Hairdo's.esp|043C55", "type": 3}]});
+        assert_eq!(hair(&named), hair(&with_mods("KS Hairdo's.esp")));
+    }
+
+    #[test]
+    fn masks_and_hosts_with_one_name_in_different_folders_differ() {
+        let mut a = base();
+        a["tintInfo"][0]["texture"] = json!("Actors\\ModA\\SkinTone.dds");
+        let mut b = base();
+        b["tintInfo"][0]["texture"] = json!("Actors\\ModB\\SkinTone.dds");
+        assert_ne!(face_identity(&facts(&a, false)), face_identity(&facts(&b, false)));
+        let mut c = base();
+        c["morphs"]["sculpt"][0]["host"] = json!("Other\\MouthHumanFChargen.tri");
+        assert_ne!(face_identity(&facts(&base(), false)), face_identity(&facts(&c, false)));
+    }
+
+    fn settings_in(dir: &Dir) -> settings::AppSettings {
+        settings::AppSettings {
+            backup_dir: dir.0.join("backups").display().to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn exact(members: &[&String]) -> RemovalGroup {
+        RemovalGroup {
+            kind: GroupKind::Exact,
+            members: members.iter().map(|m| m.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn removal_is_refused_unless_a_matching_copy_stays() {
+        let dir = Dir::new("refuse");
+        let settings = settings_in(&dir);
+        let a = dir.write("A.jslot", &base());
+        let copy = dir.write("A copy.jslot", &base());
+
+        // Every copy of a group.
+        assert!(remove_duplicates_in(&settings, &[exact(&[&a, &copy])], &[a.clone(), copy.clone()]).is_err());
+        // A path in no group.
+        let loose = dir.write("B.jslot", &base());
+        assert!(remove_duplicates_in(&settings, &[exact(&[&a, &copy])], std::slice::from_ref(&loose)).is_err());
+        // One file under two spellings is not a copy of itself.
+        let same_file = a.replace('\\', "/");
+        assert!(remove_duplicates_in(&settings, &[exact(&[&a, &same_file])], std::slice::from_ref(&same_file)).is_err());
+        // The keeper was re-saved since the search: no longer identical.
+        let mut edited = base();
+        edited["morphs"]["custom"][0]["value"] = json!(0.9);
+        dir.write("A.jslot", &edited);
+        assert!(remove_duplicates_in(&settings, &[exact(&[&a, &copy])], std::slice::from_ref(&copy)).is_err());
+        assert!(Path::new(&copy).exists() && Path::new(&a).exists(), "a refusal removes nothing");
+    }
+
+    #[test]
     fn removal_snapshots_first_and_history_brings_it_back() {
         let dir = Dir::new("remove");
         let victim = dir.write("Extra.jslot", &base());
+        let keeper = dir.write("Keeper.jslot", &base());
         let before = std::fs::read(&victim).unwrap();
-        let settings = settings::AppSettings {
-            backup_dir: dir.0.join("backups").display().to_string(),
-            ..Default::default()
-        };
-        assert!(remove_presets_in(&settings, &[dir.0.join("notes.txt").display().to_string()]).is_err());
+        let settings = settings_in(&dir);
+        let groups = [exact(&[&keeper, &victim])];
 
-        let outcome = remove_presets_in(&settings, std::slice::from_ref(&victim)).unwrap();
+        let outcome = remove_duplicates_in(&settings, &groups, std::slice::from_ref(&victim)).unwrap();
         assert_eq!(outcome.removed, std::slice::from_ref(&victim));
         assert!(!Path::new(&victim).exists());
         snapshot::restore_snapshot_in(&settings, &outcome.snapshot_id).unwrap();

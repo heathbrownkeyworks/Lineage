@@ -215,8 +215,11 @@ export async function findDuplicatePresets(
   return await invoke<DuplicatesReport>("find_duplicate_presets", { onProgress: channel });
 }
 
-export async function removePresets(paths: string[]): Promise<RemoveOutcome> {
-  return await invoke<RemoveOutcome>("remove_presets", { paths });
+export async function removeDuplicates(
+  groups: { kind: "exact" | "same_face"; members: string[] }[],
+  paths: string[],
+): Promise<RemoveOutcome> {
+  return await invoke<RemoveOutcome>("remove_duplicates", { groups, paths });
 }
 
 // ---- readiness ------------------------------------------------------------
