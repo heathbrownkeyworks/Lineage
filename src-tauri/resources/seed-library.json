@@ -37,7 +37,7 @@
     "pattern": "High Poly Head.esm",
     "match_type": "exact",
     "name": "High Poly Head",
-    "url": "https://vectorplexus.com/files/file/283-high-poly-head/"
+    "url": "https://www.savrenx.com/2024/05/sam-high-poly-head-14.html"
   },
   {
     "id": "seed-ks-hairdos-esp",
@@ -133,7 +133,7 @@
     "pattern": "ALT1 Facial Hair HPH Standalone AIO.esp",
     "match_type": "exact",
     "name": "ALT1 Facial Hair (HPH Standalone AIO)",
-    "url": "https://www.nexusmods.com/skyrimspecialedition/search/?gsearch=ALT1+Facial+Hair+High+Poly+Head"
+    "url": "https://www.ddsworkshop.net/alt1_eyebrows_standalone"
   },
   {
     "id": "seed-kalilies-brows",
@@ -196,8 +196,8 @@
     "kind": "plugin",
     "pattern": "MikanEyes All in one SE.esp",
     "match_type": "exact",
-    "name": "Mikan Eyes (All in One SE)",
-    "url": "https://www.nexusmods.com/skyrimspecialedition/search/?gsearch=MikanEyes+All+in+one"
+    "name": "Mikan Eyes AIO",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/18780"
   },
   {
     "id": "seed-holiday-gift-hairdos",
@@ -310,5 +310,61 @@
     "match_type": "prefix",
     "name": "Racial Skin Variance",
     "url": "https://www.nexusmods.com/skyrimspecialedition/mods/81668"
+  },
+  {
+    "id": "seed-dint999-hairpack02",
+    "kind": "plugin",
+    "pattern": "[dint999] HairPack02.esp",
+    "match_type": "exact",
+    "name": "[Dint999] HairPack02 SSE 1.12 (base)",
+    "url": "https://www.patreon.com/dint999/posts/hairpack02-hdt-1-29917266"
+  },
+  {
+    "id": "seed-mikan-eyes-flower-enhanced",
+    "kind": "plugin",
+    "pattern": "Mikan Eyes - Flower - Enhanced.esp",
+    "match_type": "exact",
+    "name": "Mikan Eyes AIO - Enhanced",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/18780"
+  },
+  {
+    "id": "seed-kai-makeup",
+    "kind": "texture",
+    "pattern": "Actors\\makeup by kai\\",
+    "match_type": "prefix",
+    "name": "Kai's Makeup and Warpaints",
+    "url": "https://www.nexusmods.com/skyrim/mods/72955"
+  },
+  {
+    "id": "seed-cotr-female-textures",
+    "kind": "texture",
+    "pattern": "!COR\\",
+    "match_type": "prefix",
+    "name": "COtR - HQ Characters creation addon for RM",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/27405"
+  },
+  {
+    "id": "seed-cotr-male-textures",
+    "kind": "texture",
+    "pattern": "!COR_Male\\",
+    "match_type": "prefix",
+    "name": "COtR - HQ Characters creation addon for RM",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/27405"
+  },
+  {
+    "id": "seed-cotr-plugin",
+    "kind": "plugin",
+    "pattern": "COR_AllRace.esp",
+    "match_type": "exact",
+    "name": "COtR - HQ Characters creation addon for RM",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/27405"
+  },
+  {
+    "id": "seed-ldd-cveo-morphs",
+    "kind": "morph",
+    "pattern": "LDD_CVEO",
+    "match_type": "prefix",
+    "name": "Complete Vanilla Eye Overhaul (CVEO) by LDD",
+    "url": "https://www.nexusmods.com/skyrimspecialedition/mods/160705"
   }
 ]
