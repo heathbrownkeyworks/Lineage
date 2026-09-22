@@ -526,8 +526,13 @@
   }
   .pickers {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* minmax(0, …): a plain 1fr track grows to its longest preset path
+       (they're long single lines), pushing the right picker off-screen. */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 14px;
+  }
+  .side {
+    min-width: 0;
   }
   .side-label {
     margin: 0 0 6px;
@@ -539,6 +544,7 @@
   }
   .picker-box {
     height: 280px;
+    min-width: 0;
     display: flex;
     flex-direction: column;
   }
