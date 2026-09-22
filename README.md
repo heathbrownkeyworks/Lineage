@@ -35,6 +35,9 @@ A RaceMenu `.jslot` preset utility by **ColdSun Creative**.
   Markdown or plain text) and the zip players install, with the presets
   cleaned the same way and each preset's head export beside it.
 
+Drop a `.jslot` onto the window and it opens on the page you're on (Find
+Assets, Clean Preset, Compare; Release also takes folders).
+
 Lineage never writes anything into your mod folders except the modified
 preset itself — no `.bak` files, no stray temp files. Every destructive
 operation snapshots the exact files it touches into your backup folder first

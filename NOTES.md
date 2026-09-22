@@ -359,6 +359,15 @@ normalized. This is the only unavoidable reformatting case found.
   independent order-insensitive check), 132 near-twins, in 2 s. Head part
   types 7 and 8 exist in the wild (FacePartMod, CVEO, Serket eyes) though the
   CK names only 0–6; they show as "Other part (type N)".
+- **Drops use Tauri's window events, handed over through the store.**
+  An HTML drop gives file contents, not paths, so `+layout.svelte` listens
+  with `getCurrentWebview().onDragDropEvent` and puts the paths in
+  `drops.pending`; Find Assets, Clean Preset, Compare and Release consume it
+  in an effect (so a drop that navigated to Find Assets is handled once that
+  page mounts). `src/lib/drop.ts` decides what the overlay says. With Tauri's
+  window drops on, in-page HTML drag-and-drop doesn't fire on Windows —
+  nothing in the app uses it. #9's thumbnails were dropped: preset mods don't
+  ship screenshots (2 of 40 have any image at all).
 - **Precedence rule: user > automatic > seed.** A manual library entry
   (kind, match_type, pattern — the "shadow key") always wins over a seed
   entry covering the same pattern; the shadowed seed entry is marked

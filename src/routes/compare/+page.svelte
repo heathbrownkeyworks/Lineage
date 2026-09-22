@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Copy, GitCompare, Trash2, CheckCircle2 } from "lucide-svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import PresetPicker from "$lib/components/PresetPicker.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import { comparePresets, findDuplicatePresets, removeDuplicates } from "$lib/tauri";
-  import { bumpPresets } from "$lib/stores/app.svelte";
+  import { bumpPresets, drops } from "$lib/stores/app.svelte";
+  import { isPreset } from "$lib/drop";
   import type {
     CompareProgress,
     Comparison,
@@ -157,6 +159,25 @@
     void runCompare();
     compareCard?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+
+  // Presets dropped on the window: two fill both sides; one fills the empty
+  // side (left first), or replaces the right when both are full.
+  $effect(() => {
+    const paths = drops.pending;
+    if (!paths) return;
+    untrack(() => {
+      drops.pending = null;
+      const presets = paths.filter(isPreset);
+      if (presets.length === 0) return;
+      if (presets.length > 1) {
+        left = presets[0];
+        right = presets[1];
+      } else if (!left) left = presets[0];
+      else right = presets[0];
+      comparison = null;
+      void runCompare();
+    });
+  });
 
   function headline(c: Comparison): string {
     if (c.same_bytes) return "Identical files, byte for byte.";

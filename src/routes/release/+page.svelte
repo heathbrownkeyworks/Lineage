@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { FolderOpen, FilePlus, ListChecks, Copy, Check, X, Package, CheckCircle2 } from "lucide-svelte";
   import { goto } from "$app/navigation";
   import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -7,6 +8,8 @@
   import ProgressBar from "$lib/components/ProgressBar.svelte";
   import { listPresetsIn, requirementsFor, renderRequirements, packRelease } from "$lib/tauri";
   import { DEFAULT_CATEGORIES, categoryLabel } from "$lib/clean";
+  import { drops } from "$lib/stores/app.svelte";
+  import { isPreset } from "$lib/drop";
   import type { ExportFormat, FindProgress, PackOutcome, PackProgress, RequirementsReport } from "$lib/types";
 
   const FORMATS: { id: ExportFormat; label: string }[] = [
@@ -90,6 +93,42 @@
     } finally {
       listing = false;
     }
+  }
+
+  // Presets and folders dropped on the window: presets are added as-is,
+  // folders contribute every .jslot inside, like Pick a folder.
+  $effect(() => {
+    const paths = drops.pending;
+    if (!paths) return;
+    untrack(() => {
+      drops.pending = null;
+      void addDropped(paths);
+    });
+  });
+
+  async function addDropped(paths: string[]) {
+    error = null;
+    if (busy) {
+      error = "Busy — drop them again when this finishes.";
+      return;
+    }
+    const found = paths.filter(isPreset);
+    const others = paths.filter((p) => !isPreset(p));
+    listing = true;
+    try {
+      for (const folder of others) {
+        try {
+          found.push(...(await listPresetsIn(folder)));
+          pickedFolder ??= folder;
+        } catch {
+          // A file that isn't a preset, or an empty folder.
+        }
+      }
+    } finally {
+      listing = false;
+    }
+    if (found.length === 0) error = "Nothing to add: drop .jslot presets, or folders that contain them.";
+    else addPaths(found);
   }
 
   async function pickFiles() {

@@ -13,6 +13,11 @@ export function bumpSettings(): void {
   appEvents.settingsVersion++;
 }
 
+/** Files dropped on the window, waiting for the page that handles them.
+ *  The page clears it once it has acted, so a drop that had to navigate
+ *  first is still handled when the page mounts. */
+export const drops = $state<{ pending: string[] | null }>({ pending: null });
+
 /** Call after anything that writes presets or makes a backup — both change
  *  what the backup nudge reports. */
 export function bumpPresets(): void {

@@ -10,7 +10,8 @@
   import LinkModal from "$lib/components/LinkModal.svelte";
   import ReadinessPanel from "$lib/components/ReadinessPanel.svelte";
   import { findAssets, getSettings, readinessFor } from "$lib/tauri";
-  import { appEvents } from "$lib/stores/app.svelte";
+  import { appEvents, drops } from "$lib/stores/app.svelte";
+  import { isPreset } from "$lib/drop";
   import type { AssetRef, FindAssetsReport, FindProgress, IdentifiedGroup, PresetReadiness } from "$lib/types";
 
   let selectedPath = $state<string | null>(null);
@@ -94,6 +95,17 @@
       }
     }
   }
+
+  // A preset dropped on the window (possibly before this page mounted).
+  $effect(() => {
+    const paths = drops.pending;
+    if (!paths) return;
+    untrack(() => {
+      drops.pending = null;
+      const first = paths.find(isPreset);
+      if (first) void analyze(first);
+    });
+  });
 
   async function openExternal(url: string) {
     try {

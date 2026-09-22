@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Eraser, RotateCcw, ShieldCheck, Archive } from "lucide-svelte";
   import { goto } from "$app/navigation";
   import PageHeader from "$lib/components/PageHeader.svelte";
@@ -6,7 +7,8 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import CategoryPicker from "$lib/components/CategoryPicker.svelte";
   import { inspectPreset, cleanPreset, restoreSnapshot, getBackupStatus } from "$lib/tauri";
-  import { appEvents, bumpPresets } from "$lib/stores/app.svelte";
+  import { appEvents, bumpPresets, drops } from "$lib/stores/app.svelte";
+  import { isPreset } from "$lib/drop";
   import { DEFAULT_CATEGORIES, categoryLabel, describeCounts } from "$lib/clean";
   import type { CleanCategory, Finding, PresetInspection, SingleCleanOutcome } from "$lib/types";
 
@@ -38,6 +40,17 @@
       .catch(() => {
         // Browser preview — leave the default.
       });
+  });
+
+  // A preset dropped on the window (possibly before this page mounted).
+  $effect(() => {
+    const paths = drops.pending;
+    if (!paths) return;
+    untrack(() => {
+      drops.pending = null;
+      const first = paths.find(isPreset);
+      if (first) void pick(first);
+    });
   });
 
   async function pick(path: string) {
