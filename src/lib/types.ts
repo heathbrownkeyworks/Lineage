@@ -423,6 +423,36 @@ export type PackProgress = {
   name: string;
 };
 
+/** One file of a RaceMenu head export. */
+export type ExportFile = { path: string; size: number };
+
+/** A preset's head export: the .nif (head mesh) and .dds (tint) Export Head writes. */
+export type HeadExport = {
+  preset: string;
+  nif: ExportFile | null;
+  dds: ExportFile | null;
+  /** Where to start looking by hand. */
+  look_in: string;
+};
+
+/** What the page sends to pack for one preset. */
+export type HeadExportChoice = { preset: string; nif: string | null; dds: string | null };
+
+export type FolderMatch = {
+  found: HeadExport[];
+  /** Presets whose name turned up in more than one folder. */
+  ambiguous: string[];
+};
+
+/** What ships for one preset in a pack. */
+export type HeadRow = {
+  nif: ExportFile | null;
+  dds: ExportFile | null;
+  /** found: by exact name; chosen: by hand or from a folder; none: nothing, or cleared. */
+  how: "found" | "chosen" | "none";
+  look_in: string;
+};
+
 export type PackOutcome = {
   path: string;
   presets: number;

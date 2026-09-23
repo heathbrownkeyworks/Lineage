@@ -33,7 +33,8 @@ A RaceMenu `.jslot` preset utility by **ColdSun Creative**.
 - **Release** — for preset authors: the Nexus Requirements section for a
   pack (every mod its presets need, counted and linked, in Nexus BBCode,
   Markdown or plain text) and the zip players install, with the presets
-  cleaned the same way and each preset's head export beside it.
+  cleaned the same way and each preset's RaceMenu head export (`.nif` +
+  `.dds`): found by name, or chosen by hand when it was saved under another.
 
 Drop a `.jslot` onto the window and it opens on the page you're on (Find
 Assets, Clean Preset, Compare; Release also takes folders).

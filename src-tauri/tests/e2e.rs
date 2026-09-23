@@ -336,14 +336,16 @@ fn real_pack_requirements_render_in_the_house_style() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// Pack real presets: all of ColdSun's Face Presets cleaned, a small pack
-/// with its head exports, and subfolder packs (Anuketh's named folder,
-/// Miggyluv's Female/Male). Every pack is verified by build_pack itself;
-/// here the layout is checked and no source file may change.
+/// Pack real presets: all of ColdSun's Face Presets cleaned; head exports
+/// found by name across the collection; a small pack with its exports; one
+/// export saved under another name, chosen by hand; subfolder packs
+/// (Anuketh's named folder, Miggyluv's Female/Male); and Miggyluv's exports,
+/// kept in Head Sculpts\, matched by folder. Every pack is verified by
+/// build_pack itself; here the layout is checked and no source may change.
 #[test]
 fn real_packs_build_verify_and_leave_sources_alone() {
     use lineage_lib::clean::CleanCategory::*;
-    use lineage_lib::package;
+    use lineage_lib::package::{self, HeadExport, HeadExportChoice};
     use lineage_lib::requirements;
     let chargen = Path::new(MODS).join(r"ColdSun's Face Presets\SKSE\Plugins\CharGen");
     let anuketh = Path::new(MODS).join("Anuketh's NPC Replacer Presets AIO - All in One");
@@ -361,58 +363,128 @@ fn real_packs_build_verify_and_leave_sources_alone() {
         let mut zip = zip::ZipArchive::new(std::fs::File::open(zip_path).unwrap()).unwrap();
         (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().to_string()).collect()
     };
+    let choice_of = |h: &HeadExport| HeadExportChoice {
+        preset: h.preset.clone(),
+        nif: h.nif.as_ref().map(|f| f.path.clone()),
+        dds: h.dds.as_ref().map(|f| f.path.clone()),
+    };
+    let stem_of = |p: &str| Path::new(p).file_stem().unwrap().to_string_lossy().into_owned();
 
     // 1. The whole collection, as it would ship.
     let all = requirements::presets_in(&chargen.join("Presets")).unwrap();
     let before: Vec<Vec<u8>> = all.iter().map(|p| std::fs::read(p).unwrap()).collect();
-    let out = package::build_pack(&all, &defaults, None, false, &tmp.join("all.zip"), &mut |_| {}).unwrap();
+    let out = package::build_pack(&all, &defaults, None, &[], &tmp.join("all.zip"), &mut |_| {}).unwrap();
     assert_eq!(out.presets, all.len());
     assert!(out.cleaned > 0, "some of the collection carries body or placement data");
     let after: Vec<Vec<u8>> = all.iter().map(|p| std::fs::read(p).unwrap()).collect();
     assert!(before == after, "a preset on disk changed");
     eprintln!("collection: {} presets, {} cleaned", out.presets, out.cleaned);
 
-    // 2. The three presets with the smallest head exports, exports included.
-    let head_size = |p: &String| -> u64 {
-        let stem = Path::new(p).file_stem().unwrap().to_string_lossy().into_owned();
-        ["nif", "dds"]
-            .iter()
-            .filter_map(|ext| std::fs::metadata(chargen.join(format!("{stem}.{ext}"))).ok())
-            .map(|m| m.len())
-            .sum()
-    };
-    let mut with_heads: Vec<(u64, String)> =
-        all.iter().map(|p| (head_size(p), p.clone())).filter(|(size, _)| *size > 0).collect();
-    with_heads.sort();
-    let small: Vec<String> = with_heads.into_iter().take(3).map(|(_, p)| p).collect();
-    let heads: Vec<PathBuf> = small
+    // 2. Head exports found by exact name: exactly the presets with a
+    //    same-name pair in CharGen, counted here independently.
+    let started = std::time::Instant::now();
+    let found = package::find_head_exports(&all);
+    let both = found.iter().filter(|h| h.nif.is_some() && h.dds.is_some()).count();
+    let expected = all
         .iter()
-        .flat_map(|p| {
-            let stem = Path::new(p).file_stem().unwrap().to_string_lossy().into_owned();
-            ["nif", "dds"].map(|ext| chargen.join(format!("{stem}.{ext}")))
+        .filter(|p| {
+            let stem = stem_of(p);
+            chargen.join(format!("{stem}.nif")).is_file() && chargen.join(format!("{stem}.dds")).is_file()
         })
-        .filter(|p| p.is_file())
-        .collect();
-    let head_stamps: Vec<_> = heads.iter().map(|p| stamp(p)).collect();
-    let out = package::build_pack(&small, &defaults, None, true, &tmp.join("heads.zip"), &mut |_| {}).unwrap();
-    assert_eq!((out.presets, out.head_exports), (3, heads.len()));
-    let packed = names(&tmp.join("heads.zip"));
-    for h in &heads {
-        let entry = format!("SKSE/Plugins/CharGen/{}", h.file_name().unwrap().to_string_lossy());
-        assert!(packed.contains(&entry), "{entry} missing from {packed:?}");
-    }
-    assert_eq!(heads.iter().map(|p| stamp(p)).collect::<Vec<_>>(), head_stamps);
+        .count();
+    assert_eq!(both, expected);
+    eprintln!("head exports found for {both} of {} presets in {:?}", all.len(), started.elapsed());
 
-    // 3. Subfolders survive: Anuketh's named folder, Miggyluv's Female/Male.
+    // 3. The three presets with the smallest exports, packed with them: each
+    //    lands in CharGen under its preset's name, sources untouched.
+    let size_of = |h: &HeadExport| h.nif.as_ref().map_or(0, |f| f.size) + h.dds.as_ref().map_or(0, |f| f.size);
+    let mut small: Vec<&HeadExport> = found.iter().filter(|h| size_of(h) > 0).collect();
+    small.sort_by_key(|h| size_of(h));
+    small.truncate(3);
+    let presets: Vec<String> = small.iter().map(|h| h.preset.clone()).collect();
+    let choices: Vec<HeadExportChoice> = small.iter().map(|h| choice_of(h)).collect();
+    let sources: Vec<PathBuf> = small
+        .iter()
+        .flat_map(|h| [&h.nif, &h.dds])
+        .flatten()
+        .map(|f| PathBuf::from(&f.path))
+        .collect();
+    let stamps_before: Vec<_> = sources.iter().map(|p| stamp(p)).collect();
+    let out = package::build_pack(&presets, &defaults, None, &choices, &tmp.join("heads.zip"), &mut |_| {}).unwrap();
+    assert_eq!((out.presets, out.head_exports), (3, sources.len()));
+    let packed = names(&tmp.join("heads.zip"));
+    for h in &small {
+        let stem = stem_of(&h.preset);
+        for (ext, file) in [("nif", &h.nif), ("dds", &h.dds)] {
+            if file.is_some() {
+                let entry = format!("SKSE/Plugins/CharGen/{stem}.{ext}");
+                assert!(packed.contains(&entry), "{entry} missing from {packed:?}");
+            }
+        }
+    }
+    assert_eq!(sources.iter().map(|p| stamp(p)).collect::<Vec<_>>(), stamps_before);
+
+    // 4. An export saved under another name (1-Reguard for 1-Redguard),
+    //    chosen by hand: its .dds comes along, both ship as 1-Redguard's.
+    let redguard = chargen.join(r"Presets\1-Redguard.jslot");
+    let reguard = chargen.join("1-Reguard.nif");
+    if redguard.is_file() && reguard.is_file() {
+        let redguard = redguard.display().to_string();
+        assert!(found.iter().any(|h| h.preset == redguard && h.nif.is_none()), "not found by name");
+        let chosen = package::head_export_from_picked(&redguard, &[reguard.display().to_string()]).unwrap();
+        let dds = chosen.dds.clone().expect("its .dds comes along");
+        let out = package::build_pack(
+            std::slice::from_ref(&redguard),
+            &defaults,
+            None,
+            &[choice_of(&chosen)],
+            &tmp.join("redguard.zip"),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(out.head_exports, 2);
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(tmp.join("redguard.zip")).unwrap()).unwrap();
+        let nif_size = std::fs::metadata(&reguard).unwrap().len();
+        assert_eq!(zip.by_name("SKSE/Plugins/CharGen/1-Redguard.nif").unwrap().size(), nif_size);
+        assert_eq!(zip.by_name("SKSE/Plugins/CharGen/1-Redguard.dds").unwrap().size(), dds.size);
+    }
+
+    // 5. Subfolders survive: Anuketh's named folder, Miggyluv's Female/Male.
     let mut sub = requirements::presets_in(&anuketh).unwrap();
-    sub.extend(requirements::presets_in(&miggy).unwrap());
-    let out = package::build_pack(&sub, &defaults, None, true, &tmp.join("sub.zip"), &mut |_| {}).unwrap();
+    let miggy_presets = requirements::presets_in(&miggy).unwrap();
+    sub.extend(miggy_presets.iter().cloned());
+    let out = package::build_pack(&sub, &defaults, None, &[], &tmp.join("sub.zip"), &mut |_| {}).unwrap();
     assert_eq!(out.presets, sub.len());
     let packed = names(&tmp.join("sub.zip"));
     assert!(packed.iter().any(|n| n.starts_with("SKSE/Plugins/CharGen/Presets/[Anuketh Presets]/")));
     assert!(packed.iter().any(|n| n.starts_with("SKSE/Plugins/CharGen/Presets/Female/")));
     assert!(packed.iter().any(|n| n.starts_with("SKSE/Plugins/CharGen/Presets/Male/")));
-    eprintln!("subfolders: {} presets, {} cleaned, {} head exports", out.presets, out.cleaned, out.head_exports);
+    eprintln!("subfolders: {} presets, {} cleaned", out.presets, out.cleaned);
+
+    // 6. Miggyluv keeps exports in Head Sculpts\, not beside Presets: nothing
+    //    is found by name, and matching by folder finds them.
+    assert!(package::find_head_exports(&miggy_presets).iter().all(|h| h.nif.is_none() && h.dds.is_none()));
+    let sculpts =
+        package::find_head_exports_in(&miggy.join(r"SKSE\Plugins\CharGen\Head Sculpts"), &miggy_presets).unwrap();
+    assert!(!sculpts.found.is_empty(), "Miggyluv's exports are found in Head Sculpts");
+    let two: Vec<&HeadExport> = sculpts.found.iter().take(2).collect();
+    let files = two.iter().map(|h| usize::from(h.nif.is_some()) + usize::from(h.dds.is_some())).sum::<usize>();
+    let out = package::build_pack(
+        &two.iter().map(|h| h.preset.clone()).collect::<Vec<_>>(),
+        &defaults,
+        None,
+        &two.iter().map(|h| choice_of(h)).collect::<Vec<_>>(),
+        &tmp.join("sculpts.zip"),
+        &mut |_| {},
+    )
+    .unwrap();
+    assert_eq!(out.head_exports, files);
+    eprintln!(
+        "Head Sculpts: {} of {} presets matched, {} ambiguous",
+        sculpts.found.len(),
+        miggy_presets.len(),
+        sculpts.ambiguous.len()
+    );
     let _ = std::fs::remove_dir_all(&tmp);
 }
 

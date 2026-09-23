@@ -311,16 +311,32 @@ normalized. This is the only unavoidable reformatting case found.
   `SKSE/Plugins/CharGen/Presets/` + whatever follows the last
   `CharGen\Presets` in its source path (Miggyluv's `Female\`/`Male\`,
   Anuketh's `[Anuketh Presets]\` survive); anything else goes in by name.
-  Head exports are `<name>.nif`/`.dds` in the CharGen folder holding that
-  Presets folder: 24 of 40 installed preset mods ship them, 1,105 of 1,350
-  ColdSun presets have one. They average ~31 MB (uncompressed 2K/4K tint
-  masks), so they're streamed into the zip, and a whole-collection pack
-  with them would run to tens of GB. Two different files on one zip path
+  Head exports ship as `CharGen\<preset name>.nif`/`.dds` (24 of 40
+  installed preset mods include them). They average ~31 MB (uncompressed
+  2K/4K tint masks), so they're streamed into the zip, and a
+  whole-collection pack with them would run to tens of GB. Two different files on one zip path
   refuse the pack rather than overwrite: ColdSun's own collection has
   `CharGen\Exported\Colson.jslot` beside `Presets\Colson.jslot`. The zip is
   written beside its destination as a `.lineage-partial`, reopened and
   checked (entry list, every preset parses, no chosen category left), then
   renamed. Real run: 1,327 of 1,350 ColdSun presets had something to clean.
+- **Head exports are found by exact name or chosen by hand, never guessed.**
+  skee64.dll's format strings: Export Head writes
+  `Data\SKSE\Plugins\CharGen\%s.nif` and `%s.dds` under the name typed in
+  its dialog, and Save Preset writes `SKSE\Plugins\CharGen\Presets\%s.jslot`
+  separately, so the names drift. 1,105 of 1,350 ColdSun presets have an
+  exact-name pair; 245 don't (`1-Reguard.nif` for `1-Redguard.jslot`,
+  `Anneke-V2` for `Annekke-V2`, `bellavampira` for `Bella Vampira`).
+  Similar-name matching picks other faces (`Alexia-Vampire` is closest to
+  `Valerica-Vampire`), so [package.rs](src-tauri/src/package.rs) finds exact
+  names only — the CharGen folder holding the preset's Presets folder, then
+  beside the preset, and the first with either file supplies both — and the
+  rest are chosen by hand (a lone .nif brings its same-name .dds) or matched
+  from a folder, where a name in two folders is left to choose. Miggyluv
+  keeps them in `CharGen\Head Sculpts\<sex>\<race>\`: all 24 match that way.
+  Whatever the files are called, they ship under the preset's name. Each is
+  checked by its header (`Gamebryo File Format` / `NetImmerse File Format`,
+  `DDS `) when chosen and again when packing, and by size after writing.
 - **Readiness checks real files; slider families are never "Missing".**
   [readiness.rs](src-tauri/src/readiness.rs) indexes the active setup once:
   MO2 `modlist.txt` (separators skipped), `plugins.txt` (`*` = active;

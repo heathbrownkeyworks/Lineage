@@ -30,6 +30,9 @@ import type {
   Comparison,
   DuplicatesReport,
   RemoveOutcome,
+  FolderMatch,
+  HeadExport,
+  HeadExportChoice,
   PackOutcome,
   PackProgress,
   PresetInspection,
@@ -240,7 +243,7 @@ export async function packRelease(
   paths: string[],
   categories: CleanCategory[],
   subfolder: string,
-  includeHeadExports: boolean,
+  headExports: HeadExportChoice[],
   dest: string,
   onProgress?: (p: PackProgress) => void,
 ): Promise<PackOutcome> {
@@ -250,10 +253,25 @@ export async function packRelease(
     paths,
     categories,
     subfolder: subfolder.trim() || null,
-    includeHeadExports,
+    headExports,
     dest,
     onProgress: channel,
   });
+}
+
+/** Each preset's head export found by exact name, where there is one. */
+export async function headExportsFor(paths: string[]): Promise<HeadExport[]> {
+  return await invoke<HeadExport[]>("head_exports_for", { paths });
+}
+
+/** Check files picked by hand for one preset; a lone pick brings its partner. */
+export async function chooseHeadExport(preset: string, picked: string[]): Promise<HeadExport> {
+  return await invoke<HeadExport>("choose_head_export", { preset, picked });
+}
+
+/** Exact-name head exports for these presets anywhere under a folder. */
+export async function headExportsInFolder(folder: string, presets: string[]): Promise<FolderMatch> {
+  return await invoke<FolderMatch>("head_exports_in_folder", { folder, presets });
 }
 
 // ---- nexus ----------------------------------------------------------------
@@ -315,11 +333,12 @@ export async function reviewRefresh(
 
 // ---- shared display helpers ----------------------------------------------
 
-/** "2.4 KB" / "13.1 MB" style size. */
+/** "2.4 KB" / "13.1 MB" / "1.25 GB" style size. */
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 /** Local date + time from unix seconds. */

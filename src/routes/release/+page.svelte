@@ -6,11 +6,20 @@
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import ProgressBar from "$lib/components/ProgressBar.svelte";
+  import HeadExports from "$lib/components/HeadExports.svelte";
   import { listPresetsIn, requirementsFor, renderRequirements, packRelease } from "$lib/tauri";
   import { DEFAULT_CATEGORIES, categoryLabel } from "$lib/clean";
   import { drops } from "$lib/stores/app.svelte";
   import { isPreset } from "$lib/drop";
-  import type { ExportFormat, FindProgress, PackOutcome, PackProgress, RequirementsReport } from "$lib/types";
+  import type {
+    ExportFormat,
+    FindProgress,
+    HeadExportChoice,
+    HeadRow,
+    PackOutcome,
+    PackProgress,
+    RequirementsReport,
+  } from "$lib/types";
 
   const FORMATS: { id: ExportFormat; label: string }[] = [
     { id: "bbcode", label: "Nexus BBCode" },
@@ -50,6 +59,8 @@
   let pickedFolder = $state<string | null>(null);
   let subfolder = $state("");
   let headExports = $state(true);
+  /** Preset → the head export that ships with it (HeadExports keeps this). */
+  let heads = $state<Map<string, HeadRow>>(new Map());
   let packing = $state(false);
   let packProgress = $state<PackProgress | null>(null);
   let packed = $state<PackOutcome | null>(null);
@@ -219,12 +230,18 @@
     if (typeof dest !== "string") return;
     packing = true;
     packProgress = null;
+    const choices: HeadExportChoice[] = headExports
+      ? chosen.flatMap((preset) => {
+          const r = heads.get(preset);
+          return r && (r.nif || r.dds) ? [{ preset, nif: r.nif?.path ?? null, dds: r.dds?.path ?? null }] : [];
+        })
+      : [];
     try {
       packed = await packRelease(
         chosen,
         asShipped ? DEFAULT_CATEGORIES : [],
         subfolder,
-        headExports,
+        choices,
         dest,
         (p) => (packProgress = p),
       );
@@ -470,21 +487,16 @@
             }}
           />
         </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            bind:checked={headExports}
-            disabled={packing}
-            onchange={() => {
-              packed = null;
-              packError = null;
-            }}
-          />
-          <span>
-            Include each preset's head export — the <span class="mono">.nif</span> and
-            <span class="mono">.dds</span> of the same name beside its Presets folder
-          </span>
-        </label>
+        <HeadExports
+          presets={chosen}
+          bind:enabled={headExports}
+          bind:rows={heads}
+          disabled={busy}
+          onchange={() => {
+            packed = null;
+            packError = null;
+          }}
+        />
       </div>
       <button type="button" class="btn btn-primary" disabled={busy} onclick={savePack}>
         <Package size={14} /> Save pack…
