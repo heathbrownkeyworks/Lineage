@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { FilePlus, FolderSearch, X } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { chooseHeadExport, formatSize, headExportsFor, headExportsInFolder } from "$lib/tauri";
@@ -32,6 +32,12 @@
   let error = $state<string | null>(null);
   let rowErrors = $state<Map<string, string>>(new Map());
   let request = 0;
+  // Answers arriving after the pack is cleared (this unmounts) are dropped:
+  // `rows` is the page's, and a late one would bring old rows back.
+  let alive = true;
+  onDestroy(() => {
+    alive = false;
+  });
 
   // A row for every chosen preset: rows for presets no longer chosen go, and
   // new presets are looked up. Exact names only; the backend never guesses.
@@ -48,20 +54,29 @@
       finding = true;
       headExportsFor(fresh)
         .then((found) => {
-          if (id !== request) return;
+          if (id !== request || !alive) return;
+          // Only presets still in the pack, and a pick made while this ran wins.
+          const current = new Set(presets);
           const next = new Map(rows);
           for (const h of found) {
-            // A pick made while this ran wins.
-            if (next.has(h.preset)) continue;
+            if (!current.has(h.preset) || next.has(h.preset)) continue;
             next.set(h.preset, { nif: h.nif, dds: h.dds, how: h.nif || h.dds ? "found" : "none", look_in: h.look_in });
           }
           rows = next;
         })
         .catch((e) => {
-          if (id === request) error = errorText(e);
+          if (id !== request || !alive) return;
+          error = `Couldn't look for head exports (${errorText(e)}). Choose them by hand, or untick head exports.`;
+          // Rows, empty, so the pack isn't left waiting on a lookup that failed.
+          const current = new Set(presets);
+          const next = new Map(rows);
+          for (const p of fresh) {
+            if (current.has(p) && !next.has(p)) next.set(p, { nif: null, dds: null, how: "none", look_in: "" });
+          }
+          rows = next;
         })
         .finally(() => {
-          if (id === request) finding = false;
+          if (id === request && alive) finding = false;
         });
     });
   });
@@ -135,9 +150,9 @@
     try {
       const h = await chooseHeadExport(preset, files);
       // Only if the preset is still in the pack.
-      if (presets.includes(preset)) setRow(preset, { nif: h.nif, dds: h.dds, how: "chosen", look_in: h.look_in });
+      if (alive && presets.includes(preset)) setRow(preset, { nif: h.nif, dds: h.dds, how: "chosen", look_in: h.look_in });
     } catch (e) {
-      setRowError(preset, errorText(e));
+      if (alive) setRowError(preset, errorText(e));
     }
   }
 
@@ -163,6 +178,7 @@
     searching = true;
     try {
       const matched = await headExportsInFolder(folder, missing);
+      if (!alive) return;
       const next = new Map(rows);
       let added = 0;
       for (const h of matched.found) {
@@ -180,9 +196,9 @@
           ? ` ${repeats} name${repeats === 1 ? " is" : "s are"} in more than one folder there; choose ${repeats === 1 ? "that one" : "those"} by hand.`
           : "");
     } catch (e) {
-      error = errorText(e);
+      if (alive) error = errorText(e);
     } finally {
-      searching = false;
+      if (alive) searching = false;
     }
   }
 </script>

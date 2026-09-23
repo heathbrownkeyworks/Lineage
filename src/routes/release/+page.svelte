@@ -68,6 +68,8 @@
   /** A folder's presets are being listed — the selection is about to change. */
   let listing = $state(false);
   const busy = $derived(building || packing || listing);
+  /** Presets still being looked up would ship without their head export. */
+  const headsPending = $derived(headExports && chosen.some((p) => !heads.has(p)));
 
   const includedCount = $derived(
     report ? report.requirements.filter((r) => !excluded.has(r.key)).length : 0,
@@ -76,6 +78,10 @@
   /** Any change to what's being described makes the last report stale. */
   function setChosen(paths: string[]) {
     chosen = paths;
+    // A preset taken out takes its head export with it; added back, it's
+    // looked up afresh.
+    const keep = new Set(paths);
+    if ([...heads.keys()].some((p) => !keep.has(p))) heads = new Map([...heads].filter(([p]) => keep.has(p)));
     report = null;
     excluded = new Set();
     packed = null;
@@ -221,6 +227,7 @@
   }
 
   async function savePack() {
+    if (headsPending) return;
     packError = null;
     packed = null;
     const dest = await saveDialog({
@@ -498,9 +505,12 @@
           }}
         />
       </div>
-      <button type="button" class="btn btn-primary" disabled={busy} onclick={savePack}>
+      <button type="button" class="btn btn-primary" disabled={busy || headsPending} onclick={savePack}>
         <Package size={14} /> Save pack…
       </button>
+      {#if headsPending}
+        <p class="quiet">Looking for head exports first…</p>
+      {/if}
       {#if packing}
         <div class="pack-progress">
           <ProgressBar

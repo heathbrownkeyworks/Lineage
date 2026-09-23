@@ -356,6 +356,26 @@ pub fn find_head_exports_in(folder: &Path, presets: &[String]) -> Result<FolderM
     Ok(out)
 }
 
+/// Two choices naming the same files (ignoring case, as Windows does).
+fn same_export(a: &HeadExportChoice, b: &HeadExportChoice) -> bool {
+    let key = |c: &HeadExportChoice| {
+        (
+            c.nif.as_deref().map(str::to_lowercase),
+            c.dds.as_deref().map(str::to_lowercase),
+        )
+    };
+    key(a) == key(b)
+}
+
+fn export_text(c: &HeadExportChoice) -> String {
+    let files: Vec<&str> = [c.nif.as_deref(), c.dds.as_deref()].into_iter().flatten().collect();
+    if files.is_empty() {
+        "nothing".to_string()
+    } else {
+        files.join(" + ")
+    }
+}
+
 /// Where every file goes. Two different sources on the same zip path
 /// (compared without case, as Windows would) fail the plan; the same head
 /// export chosen for two presets is packed once. Head exports go to
@@ -369,6 +389,10 @@ fn plan(paths: &[String], subfolder: Option<&str>, choices: &[HeadExportChoice])
     let mut taken: HashMap<String, usize> = HashMap::new();
     let mut collisions: Vec<String> = Vec::new();
     let mut not_exports: Vec<String> = Vec::new();
+    // One name in the zip holds one head export. Two presets of one name may
+    // share theirs, but one export's head must never ship with another's tint.
+    let mut claimed: HashMap<String, (&str, &HeadExportChoice)> = HashMap::new();
+    let mut mixed: Vec<String> = Vec::new();
 
     let mut push = |entry: Entry, entries: &mut Vec<Entry>| match taken.get(&entry.name.to_lowercase()) {
         Some(&i) if entries[i].source == entry.source => {}
@@ -405,11 +429,23 @@ fn plan(paths: &[String], subfolder: Option<&str>, choices: &[HeadExportChoice])
             &mut entries,
         );
 
-        let Some(choice) = chosen.get(&p.to_lowercase()) else { continue };
+        let Some(&choice) = chosen.get(&p.to_lowercase()) else { continue };
         let stem = path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
+        if let Some(&(first, earlier)) = claimed.get(&stem.to_lowercase()) {
+            if !same_export(earlier, choice) {
+                mixed.push(format!(
+                    "{CHARGEN}/{stem}.nif and .dds, one name for two head exports\n    {first}: {}\n    {p}: {}",
+                    export_text(earlier),
+                    export_text(choice)
+                ));
+            }
+            // Either way it's packed once, from the first.
+            continue;
+        }
+        claimed.insert(stem.to_lowercase(), (p.as_str(), choice));
         for (ext, source) in [("nif", &choice.nif), ("dds", &choice.dds)] {
             let Some(source) = source else { continue };
             let source = PathBuf::from(source);
@@ -436,6 +472,7 @@ fn plan(paths: &[String], subfolder: Option<&str>, choices: &[HeadExportChoice])
             listed(&not_exports)
         ));
     }
+    collisions.extend(mixed);
     if !collisions.is_empty() {
         return Err(format!(
             "{} file{} would land on the same path in the zip, so nothing was packed. Rename one of each pair, or leave one out:\n{}",
@@ -935,8 +972,28 @@ mod tests {
                 dds: None,
             },
         ];
-        let err = pack(&sb, &[female, male], &[], None, &clash).unwrap_err();
+        let err = pack(&sb, &[female.clone(), male.clone()], &[], None, &clash).unwrap_err();
         assert!(err.contains(&other), "{err}");
+        assert!(!sb.dest().exists());
+
+        // One preset's lone head and the other's lone tint land on different
+        // zip paths, but they're two exports: never shipped as one pair.
+        let x = sb.file(r"X\Ria.nif", NIF);
+        let y = sb.file(r"Y\Ria.dds", DDS);
+        let halves = [
+            HeadExportChoice {
+                preset: female.clone(),
+                nif: Some(x),
+                dds: None,
+            },
+            HeadExportChoice {
+                preset: male.clone(),
+                nif: None,
+                dds: Some(y.clone()),
+            },
+        ];
+        let err = pack(&sb, &[female, male], &[], None, &halves).unwrap_err();
+        assert!(err.contains("two head exports") && err.contains(&y), "{err}");
         assert!(!sb.dest().exists());
 
         // Same file name from two mods: refused, both named, nothing written.
